@@ -363,6 +363,7 @@ pub async fn save_config(
     if let Some(instance) = instance_lock.as_ref() {
         // 更新模型映射
         instance.axum_server.update_mapping(&config.proxy).await;
+        instance.axum_server.update_pm_router(&config.proxy).await;
         // 更新上游代理
         instance
             .axum_server

@@ -53,6 +53,7 @@ static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|
     m.insert("gemini-3-pro-preview", "gemini-3-pro-preview");
     m.insert("gemini-3-pro", "gemini-3-pro-preview");  // 统一映射到 preview
     m.insert("gemini-2.5-flash", "gemini-2.5-flash");
+    m.insert("gemini-2.5-pro", "gemini-2.5-pro");
     m.insert("gemini-3-flash", "gemini-3-flash");
     m.insert("gemini-3-pro-image", "gemini-3-pro-image");
 
@@ -136,7 +137,7 @@ pub async fn get_all_dynamic_models(
 
     model_ids.insert("gemini-2.0-flash-exp".to_string());
     model_ids.insert("gemini-2.5-flash".to_string());
-    // gemini-2.5-pro removed 
+    model_ids.insert("gemini-2.5-pro".to_string());
     model_ids.insert("gemini-3-flash".to_string());
     model_ids.insert("gemini-3-pro-high".to_string());
     model_ids.insert("gemini-3-pro-low".to_string());
@@ -260,7 +261,7 @@ pub fn normalize_to_standard_id(model_name: &str) -> Option<String> {
         "gemini-3-flash" => Some("gemini-3-flash".to_string()),
 
         // Gemini 3 Pro High Group
-        "gemini-3-pro-high" | "gemini-3-pro-low" => Some("gemini-3-pro-high".to_string()),
+        "gemini-3-pro-high" | "gemini-3-pro-low" | "gemini-2.5-pro" => Some("gemini-3-pro-high".to_string()),
 
         // Claude 4.5 Sonnet Group
         "claude-sonnet-4-5" | "claude-sonnet-4-5-thinking" | "claude-opus-4-5-thinking" => Some("claude-sonnet-4-5".to_string()),

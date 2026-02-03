@@ -19,6 +19,7 @@ export interface ProxyConfig {
     zai?: ZaiConfig;
     scheduling?: StickySessionConfig;
     experimental?: ExperimentalConfig;
+    pm_router?: PmRouterConfig;
     user_agent_override?: string;
     saved_user_agent?: string;
     thinking_budget?: ThinkingBudgetConfig;
@@ -96,6 +97,19 @@ export interface ExperimentalConfig {
     context_compression_threshold_l1?: number;
     context_compression_threshold_l2?: number;
     context_compression_threshold_l3?: number;
+}
+
+export type PmRouterScope = 'cli_only' | 'all_requests';
+
+export interface PmRouterConfig {
+    enabled: boolean;
+    scope: PmRouterScope;
+    pm_lite_model: string;
+    pm_pro_model: string;
+    pro_keywords: string[];
+    cli_user_agents: string[];
+    max_context_chars: number;
+    fallback_model: string;
 }
 
 export interface CircuitBreakerConfig {

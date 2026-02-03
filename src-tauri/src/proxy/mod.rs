@@ -16,6 +16,7 @@ pub mod handlers; // API 端点处理器
 pub mod mappers; // 协议转换器
 pub mod middleware; // Axum 中间件
 pub mod monitor; // 监控
+pub mod pm_router; // PM Router (multi-model orchestration)
 pub mod providers; // Extra upstream providers (z.ai, etc.)
 pub mod rate_limit; // 限流跟踪
 pub mod session_manager; // 会话指纹管理
@@ -29,6 +30,8 @@ pub use config::get_thinking_budget_config;
 pub use config::update_thinking_budget_config;
 pub use config::ProxyAuthMode;
 pub use config::ProxyConfig;
+pub use config::PmRouterConfig;
+pub use config::PmRouterScope;
 pub use config::ThinkingBudgetConfig;
 pub use config::ThinkingBudgetMode;
 pub use config::ZaiConfig;

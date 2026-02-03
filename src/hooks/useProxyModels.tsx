@@ -4,7 +4,8 @@ import {
     Cpu,
     Image as ImageIcon,
     BrainCircuit,
-    Sparkles
+    Sparkles,
+    Code2
 } from 'lucide-react';
 
 export const useProxyModels = () => {
@@ -49,7 +50,13 @@ export const useProxyModels = () => {
             group: 'Gemini 2.5',
             icon: <Zap size={16} />
         },
-
+        {
+            id: 'gemini-2.5-pro',
+            name: 'Gemini 2.5 Pro',
+            desc: t('proxy.model.pro_high'),
+            group: 'Gemini 2.5',
+            icon: <Cpu size={16} />
+        },
 
         {
             id: 'gemini-2.5-flash-thinking',
@@ -57,6 +64,13 @@ export const useProxyModels = () => {
             desc: t('proxy.model.claude_sonnet_thinking'),
             group: 'Gemini 2.5',
             icon: <BrainCircuit size={16} />
+        },
+        {
+            id: 'gemini-2.5-flash-lite',
+            name: 'Gemini 2.5 Flash Lite',
+            desc: t('proxy.model.flash_lite'),
+            group: 'Gemini 2.5',
+            icon: <Zap size={16} />
         },
 
         // Claude Series
@@ -80,6 +94,29 @@ export const useProxyModels = () => {
             desc: t('proxy.model.claude_opus_thinking'),
             group: 'Claude 4.5',
             icon: <Cpu size={16} />
+        },
+
+        // Codex Series
+        {
+            id: 'gpt-5.2-codex',
+            name: 'GPT-5.2 Codex',
+            desc: t('proxy.model.codex', { defaultValue: 'Best for Coding' }),
+            group: 'Codex',
+            icon: <Code2 size={16} />
+        },
+        {
+            id: 'gpt-5.1-codex-max',
+            name: 'GPT-5.1 Codex Max',
+            desc: t('proxy.model.codex_max', { defaultValue: 'Deep Debugging' }),
+            group: 'Codex',
+            icon: <Code2 size={16} />
+        },
+        {
+            id: 'gpt-5.1-codex-mini',
+            name: 'GPT-5.1 Codex Mini',
+            desc: t('proxy.model.codex_mini', { defaultValue: 'Fast Router' }),
+            group: 'Codex',
+            icon: <Code2 size={16} />
         }
     ];
 

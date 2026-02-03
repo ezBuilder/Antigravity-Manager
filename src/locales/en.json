@@ -743,7 +743,29 @@
             "pro_image_1_1": "Image Generation (1:1)",
             "claude_sonnet": "Code Reasoning",
             "claude_sonnet_thinking": "Chain of Thought",
-            "claude_opus_thinking": "Strongest Thinking"
+            "claude_opus_thinking": "Strongest Thinking",
+            "codex": "Best for Coding",
+            "codex_max": "Deep Debugging",
+            "codex_mini": "Fast Router"
+        },
+        "pm_router": {
+            "title": "PM Router (Multi-Model Orchestration)",
+            "subtitle": "Ignore client model hints and let the PM agent select the best model before routing.",
+            "enabled": "Enable PM Router",
+            "scope": "Apply Scope",
+            "scope_cli": "CLI Only",
+            "scope_all": "All Requests",
+            "lite_model": "PM-lite Model",
+            "pro_model": "PM-pro Model",
+            "fallback_model": "Fallback Model",
+            "context_limit": "Context Limit (chars)",
+            "context_hint": "Used to cap the prompt sent to the router agent.",
+            "user_agents": "CLI User-Agent Keywords",
+            "user_agents_hint": "Comma-separated keywords used to detect CLI traffic.",
+            "pro_keywords": "Escalation Keywords",
+            "pro_keywords_hint": "Comma-separated keywords that trigger PM-pro routing.",
+            "assignment_title": "Default Model Assignments",
+            "assignment_desc": "Based on the PRD: coder/debug/review/architecture/docs/research/image agents."
         },
         "mapping": {
             "title": "Claude Code Model Mapping",
