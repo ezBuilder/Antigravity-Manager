@@ -4,6 +4,7 @@ use axum::{
 };
 use base64::Engine as _;
 use bytes::Bytes;
+use futures::StreamExt;
 use serde_json::{json, Value};
 use tracing::{debug, error, info}; // Import Engine trait for encode method
 
@@ -20,6 +21,100 @@ use super::common::{
 };
 use crate::proxy::session_manager::SessionManager;
 use tokio::time::Duration;
+
+async fn handle_codex_passthrough(
+    state: &AppState,
+    body: Value,
+    model: &str,
+    stream: bool,
+    session_id: String,
+    endpoint: &str,
+) -> Result<Response, (StatusCode, String)> {
+    let token_manager = state.token_manager;
+    let pool_size = token_manager.len();
+    let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size.saturating_add(1)).max(1);
+
+    let client = crate::utils::http::get_long_client();
+    let url = format!("https://api.openai.com/v1{}", endpoint);
+
+    let mut last_error = String::new();
+    let mut last_email: Option<String> = None;
+
+    for attempt in 0..max_attempts {
+        let (api_key, _project_id, email, _wait_ms) = match token_manager
+            .get_token("codex", attempt > 0, Some(&session_id), model)
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                return Err((StatusCode::SERVICE_UNAVAILABLE, format!("Token error: {}", e)));
+            }
+        };
+
+        last_email = Some(email.clone());
+
+        let request = client
+            .post(&url)
+            .bearer_auth(api_key)
+            .json(&body);
+
+        let response = match request.send().await {
+            Ok(res) => res,
+            Err(e) => {
+                last_error = format!("OpenAI request failed: {}", e);
+                continue;
+            }
+        };
+
+        if response.status().is_success() {
+            if stream {
+                let stream = response
+                    .bytes_stream()
+                    .map(|item| item.map_err(|e| e.to_string()));
+                use axum::body::Body;
+                let body = Body::from_stream(stream);
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "text/event-stream")
+                    .header("Cache-Control", "no-cache")
+                    .header("Connection", "keep-alive")
+                    .header("X-Accel-Buffering", "no")
+                    .header("X-Account-Email", &email)
+                    .header("X-Mapped-Model", model)
+                    .body(body)
+                    .unwrap()
+                    .into_response());
+            }
+
+            let payload = response
+                .json::<Value>()
+                .await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Invalid OpenAI response: {}", e)))?;
+            return Ok((
+                StatusCode::OK,
+                [
+                    ("X-Account-Email", email.as_str()),
+                    ("X-Mapped-Model", model),
+                ],
+                Json(payload),
+            )
+                .into_response());
+        }
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        last_error = format!("OpenAI upstream {}: {}", status, text);
+    }
+
+    Err((
+        StatusCode::BAD_GATEWAY,
+        format!(
+            "OpenAI upstream failed. Last error: {} (last_account: {})",
+            last_error,
+            last_email.unwrap_or_else(|| "unknown".to_string())
+        ),
+    ))
+}
 
 pub async fn handle_chat_completions(
     State(state): State<AppState>,
@@ -80,6 +175,19 @@ pub async fn handle_chat_completions(
 
     let mut openai_req: OpenAIRequest = serde_json::from_value(body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
+
+    if crate::proxy::common::model_mapping::is_codex_model(&openai_req.model) {
+        let session_id = SessionManager::extract_openai_session_id(&openai_req);
+        return handle_codex_passthrough(
+            &state,
+            body,
+            &openai_req.model,
+            openai_req.stream,
+            session_id,
+            "/chat/completions",
+        )
+        .await;
+    }
 
     // Safety: Ensure messages is not empty
     if openai_req.messages.is_empty() {
@@ -617,6 +725,33 @@ pub async fn handle_completions(
     );
 
     let is_codex_style = body.get("input").is_some() || body.get("instructions").is_some();
+
+    if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
+        if crate::proxy::common::model_mapping::is_codex_model(model) {
+            let openai_req: OpenAIRequest = match serde_json::from_value(body.clone()) {
+                Ok(req) => req,
+                Err(e) => {
+                    return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
+                        .into_response();
+                }
+            };
+            let session_id = SessionManager::extract_openai_session_id(&openai_req);
+            let endpoint = if is_codex_style { "/responses" } else { "/completions" };
+            return match handle_codex_passthrough(
+                &state,
+                body,
+                model,
+                openai_req.stream,
+                session_id,
+                endpoint,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err((status, message)) => (status, message).into_response(),
+            };
+        }
+    }
 
     // 1. Convert Payload to Messages (Shared Chat Format)
     if is_codex_style {

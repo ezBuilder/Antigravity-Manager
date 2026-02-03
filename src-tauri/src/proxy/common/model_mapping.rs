@@ -40,6 +40,11 @@ static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|
     m.insert("gpt-3.5-turbo-1106", "gemini-2.5-flash");
     m.insert("gpt-3.5-turbo-0613", "gemini-2.5-flash");
 
+    // Codex models
+    m.insert("gpt-5.2-codex", "gpt-5.2-codex");
+    m.insert("gpt-5.1-codex-max", "gpt-5.1-codex-max");
+    m.insert("gpt-5.1-codex-mini", "gpt-5.1-codex-mini");
+
     // Gemini 协议映射表
     m.insert("gemini-2.5-flash-lite", "gemini-2.5-flash");
     m.insert("gemini-2.5-flash-thinking", "gemini-2.5-flash-thinking");
@@ -78,6 +83,13 @@ pub fn map_claude_model_to_gemini(input: &str) -> String {
 
     // 3. Fallback to default
     "claude-sonnet-4-5".to_string()
+}
+
+pub fn is_codex_model(input: &str) -> bool {
+    matches!(
+        input,
+        "gpt-5.2-codex" | "gpt-5.1-codex-max" | "gpt-5.1-codex-mini"
+    )
 }
 
 /// 获取所有内置支持的模型列表关键字

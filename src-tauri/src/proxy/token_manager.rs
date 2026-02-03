@@ -17,6 +17,7 @@ pub struct ProxyToken {
     pub expires_in: i64,
     pub timestamp: i64,
     pub email: String,
+    pub provider: String,
     pub account_path: PathBuf, // 账号文件路径，用于更新
     pub project_id: Option<String>,
     pub subscription_tier: Option<String>, // "FREE" | "PRO" | "ULTRA"
@@ -364,6 +365,12 @@ impl TokenManager {
         // [NEW] 提取最近的配额刷新时间（用于排序优化：刷新时间越近优先级越高）
         let reset_time = self.extract_earliest_reset_time(&account);
 
+        let provider = account
+            .get("provider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("google")
+            .to_string();
+
         Ok(Some(ProxyToken {
             account_id,
             access_token,
@@ -371,6 +378,7 @@ impl TokenManager {
             expires_in,
             timestamp,
             email,
+            provider,
             account_path: path.clone(),
             project_id,
             subscription_tier,
@@ -848,9 +856,21 @@ impl TokenManager {
     ) -> Result<(String, String, String, u64), String> {
         let mut tokens_snapshot: Vec<ProxyToken> =
             self.tokens.iter().map(|e| e.value().clone()).collect();
+
+        let target_provider = if crate::proxy::common::model_mapping::is_codex_model(target_model) {
+            "codex"
+        } else {
+            "google"
+        };
+
+        tokens_snapshot.retain(|token| token.provider == target_provider);
+
         let total = tokens_snapshot.len();
         if total == 0 {
-            return Err("Token pool is empty".to_string());
+            return Err(format!(
+                "Token pool is empty for provider: {}",
+                target_provider
+            ));
         }
 
         // ===== 【优化】Quota-First 排序: 保护低配额账号，均衡使用 =====
@@ -2205,6 +2225,7 @@ mod tests {
             expires_in: 3600,
             timestamp: chrono::Utc::now().timestamp() + 3600,
             email: email.to_string(),
+            provider: "google".to_string(),
             account_path: PathBuf::from("/tmp/test"),
             project_id: None,
             subscription_tier: tier.map(|s| s.to_string()),
@@ -2460,6 +2481,7 @@ mod tests {
             expires_in: 3600,
             timestamp: chrono::Utc::now().timestamp() + 3600,
             email: email.to_string(),
+            provider: "google".to_string(),
             account_path: PathBuf::from("/tmp/test"),
             project_id: None,
             subscription_tier: Some("PRO".to_string()),

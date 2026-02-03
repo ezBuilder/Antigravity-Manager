@@ -172,6 +172,7 @@ pub fn add_account(
         id: account_id.clone(),
         email: email.clone(),
         name: name.clone(),
+        provider: account.provider.clone(),
         disabled: false,
         proxy_disabled: false,
         created_at: account.created_at,
@@ -230,6 +231,7 @@ pub fn upsert_account(
                 // Sync name in index
                 if let Some(idx_summary) = index.accounts.iter_mut().find(|s| s.id == account_id) {
                     idx_summary.name = name;
+                    idx_summary.provider = account.provider.clone();
                     save_account_index(&index)?;
                 }
 
@@ -248,6 +250,7 @@ pub fn upsert_account(
                 // Sync name in index
                 if let Some(idx_summary) = index.accounts.iter_mut().find(|s| s.id == account_id) {
                     idx_summary.name = name;
+                    idx_summary.provider = account.provider.clone();
                     save_account_index(&index)?;
                 }
 
@@ -263,6 +266,32 @@ pub fn upsert_account(
     // Release lock, let add_account handle it
     drop(_lock);
     add_account(email, name, token)
+}
+
+/// Add or update account with explicit provider
+pub fn upsert_account_with_provider(
+    email: String,
+    name: Option<String>,
+    token: TokenData,
+    provider: &str,
+) -> Result<Account, String> {
+    let mut account = upsert_account(email, name, token)?;
+
+    if account.provider != provider {
+        account.provider = provider.to_string();
+        save_account(&account)?;
+
+        let _lock = ACCOUNT_INDEX_LOCK
+            .lock()
+            .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
+        let mut index = load_account_index()?;
+        if let Some(summary) = index.accounts.iter_mut().find(|s| s.id == account.id) {
+            summary.provider = provider.to_string();
+            save_account_index(&index)?;
+        }
+    }
+
+    Ok(account)
 }
 
 /// Delete account
@@ -396,6 +425,27 @@ pub async fn switch_account(
         "Switching to account: {} (ID: {})",
         account.email, account.id
     ));
+
+    if account.provider == "codex" {
+        crate::modules::logger::log_info(&format!(
+            "Codex account switch: skipping OAuth refresh and device integration for {}",
+            account.email
+        ));
+
+        {
+            let _lock = ACCOUNT_INDEX_LOCK
+                .lock()
+                .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
+            let mut index = load_account_index()?;
+            index.current_account_id = Some(account_id.to_string());
+            save_account_index(&index)?;
+        }
+
+        account.update_last_used();
+        save_account(&account)?;
+        integration.update_tray();
+        return Ok(());
+    }
 
     // 2. Ensure Token is valid (auto-refresh)
     let fresh_token = oauth::ensure_fresh_token(&account.token)
@@ -785,6 +835,12 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     use crate::modules::oauth;
     use reqwest::StatusCode;
 
+    if account.provider == "codex" {
+        return Err(AppError::Account(
+            "Codex accounts do not support quota refresh".to_string(),
+        ));
+    }
+
     // 1. Time-based check - ensure Token is valid first
     let token = match oauth::ensure_fresh_token(&account.token).await {
         Ok(t) => t,
@@ -997,6 +1053,13 @@ pub async fn refresh_all_quotas_logic() -> Result<RefreshStats, String> {
             if account.disabled {
                 crate::modules::logger::log_info(&format!(
                     "  - Skipping {} (Disabled)",
+                    account.email
+                ));
+                return false;
+            }
+            if account.provider == "codex" {
+                crate::modules::logger::log_info(&format!(
+                    "  - Skipping {} (Codex account)",
                     account.email
                 ));
                 return false;

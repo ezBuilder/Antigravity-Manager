@@ -202,7 +202,18 @@
             "tabs": {
                 "oauth": "OAuth",
                 "token": "Refresh Token",
+                "codex": "Codex",
                 "import": "Import DB"
+            },
+            "codex": {
+                "title": "Codex",
+                "label": "Account Label (optional)",
+                "label_placeholder": "e.g. codex-team",
+                "api_key": "Codex API Key",
+                "api_key_placeholder": "sk-...",
+                "hint": "Use a Codex API key. The label is used to identify the account in the list.",
+                "btn_confirm": "Add Codex Account",
+                "error_api_key": "Please enter Codex API Key"
             },
             "oauth": {
                 "recommend": "Recommended",

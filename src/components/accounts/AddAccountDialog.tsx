@@ -20,17 +20,19 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
     const { t } = useTranslation();
     const fetchAccounts = useAccountStore(state => state.fetchAccounts);
     const [isOpen, setIsOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<'oauth' | 'token' | 'import'>(isTauri() ? 'oauth' : 'token');
+    const [activeTab, setActiveTab] = useState<'oauth' | 'token' | 'codex' | 'import'>(isTauri() ? 'oauth' : 'token');
     const [refreshToken, setRefreshToken] = useState('');
     const [oauthUrl, setOauthUrl] = useState('');
     const [oauthUrlCopied, setOauthUrlCopied] = useState(false);
     const [manualCode, setManualCode] = useState('');
+    const [codexLabel, setCodexLabel] = useState('');
+    const [codexApiKey, setCodexApiKey] = useState('');
 
     // UI State
     const [status, setStatus] = useState<Status>('idle');
     const [message, setMessage] = useState('');
 
-    const { startOAuthLogin, completeOAuthLogin, cancelOAuthLogin, importFromDb, importV1Accounts, importFromCustomDb } = useAccountStore();
+    const { startOAuthLogin, completeOAuthLogin, cancelOAuthLogin, importFromDb, importV1Accounts, importFromCustomDb, addCodexAccount } = useAccountStore();
 
     const oauthUrlRef = useRef(oauthUrl);
     const statusRef = useRef(status);
@@ -148,6 +150,8 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
         setRefreshToken('');
         setOauthUrl('');
         setOauthUrlCopied(false);
+        setCodexLabel('');
+        setCodexApiKey('');
     };
 
     const handleAction = async (
@@ -272,6 +276,19 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
             setStatus('error');
             setMessage(t('accounts.add.token.batch_fail'));
         }
+    };
+
+    const handleCodexSubmit = async () => {
+        if (!codexApiKey.trim()) {
+            setStatus('error');
+            setMessage(t('accounts.add.codex.error_api_key'));
+            return;
+        }
+
+        await handleAction(
+            t('accounts.add.codex.title'),
+            () => addCodexAccount(codexLabel.trim() ? codexLabel.trim() : null, codexApiKey.trim())
+        );
     };
 
     const handleOAuthWeb = async () => {
@@ -486,7 +503,7 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
 
                         {/* Tab 导航 - 胶囊风格 */}
 
-                        <div className="bg-gray-100 dark:bg-base-200 p-1 rounded-xl mb-6 grid grid-cols-3 gap-1">
+                        <div className="bg-gray-100 dark:bg-base-200 p-1 rounded-xl mb-6 grid grid-cols-4 gap-1">
                             <button
                                 className={`py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'oauth'
                                     ? 'bg-white dark:bg-base-100 shadow-sm text-blue-600 dark:text-blue-400'
@@ -504,6 +521,15 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                                 onClick={() => setActiveTab('token')}
                             >
                                 {t('accounts.add.tabs.token')}
+                            </button>
+                            <button
+                                className={`py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'codex'
+                                    ? 'bg-white dark:bg-base-100 shadow-sm text-blue-600 dark:text-blue-400'
+                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-200/50 dark:hover:bg-base-300'
+                                    } `}
+                                onClick={() => setActiveTab('codex')}
+                            >
+                                {t('accounts.add.tabs.codex')}
                             </button>
                             <button
                                 className={`py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'import'
@@ -637,6 +663,41 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                                 </div>
                             )}
 
+                            {activeTab === 'codex' && (
+                                <div className="space-y-4 py-2">
+                                    <div className="bg-gray-50 dark:bg-base-200 p-4 rounded-lg border border-gray-200 dark:border-base-300 space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                                {t('accounts.add.codex.label')}
+                                            </label>
+                                            <input
+                                                className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
+                                                placeholder={t('accounts.add.codex.label_placeholder')}
+                                                value={codexLabel}
+                                                onChange={(e) => setCodexLabel(e.target.value)}
+                                                disabled={status === 'loading' || status === 'success'}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                                {t('accounts.add.codex.api_key')}
+                                            </label>
+                                            <input
+                                                type="password"
+                                                className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
+                                                placeholder={t('accounts.add.codex.api_key_placeholder')}
+                                                value={codexApiKey}
+                                                onChange={(e) => setCodexApiKey(e.target.value)}
+                                                disabled={status === 'loading' || status === 'success'}
+                                            />
+                                        </div>
+                                        <p className="text-[10px] text-gray-400">
+                                            {t('accounts.add.codex.hint')}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* 从数据库导入 */}
                             {activeTab === 'import' && (
                                 <div className="space-y-6 py-2">
@@ -710,6 +771,16 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                                 >
                                     {status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                                     {t('accounts.add.btn_confirm')}
+                                </button>
+                            )}
+                            {activeTab === 'codex' && (
+                                <button
+                                    className="flex-1 px-4 py-2.5 text-white font-medium rounded-xl shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 bg-purple-500 hover:bg-purple-600 focus:ring-purple-500 shadow-purple-100 dark:shadow-purple-900/30 flex justify-center items-center gap-2"
+                                    onClick={handleCodexSubmit}
+                                    disabled={status === 'loading' || status === 'success'}
+                                >
+                                    {status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                    {t('accounts.add.codex.btn_confirm')}
                                 </button>
                             )}
                         </div>

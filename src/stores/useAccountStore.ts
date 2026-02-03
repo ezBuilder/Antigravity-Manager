@@ -12,6 +12,7 @@ interface AccountState {
     fetchAccounts: () => Promise<void>;
     fetchCurrentAccount: () => Promise<void>;
     addAccount: (email: string, refreshToken: string) => Promise<void>;
+    addCodexAccount: (label: string | null, apiKey: string) => Promise<void>;
     deleteAccount: (accountId: string) => Promise<void>;
     deleteAccounts: (accountIds: string[]) => Promise<void>;
     switchAccount: (accountId: string) => Promise<void>;
@@ -64,6 +65,18 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         set({ loading: true, error: null });
         try {
             await accountService.addAccount(email, refreshToken);
+            await get().fetchAccounts();
+            set({ loading: false });
+        } catch (error) {
+            set({ error: String(error), loading: false });
+            throw error;
+        }
+    },
+
+    addCodexAccount: async (label: string | null, apiKey: string) => {
+        set({ loading: true, error: null });
+        try {
+            await accountService.addCodexAccount(label, apiKey);
             await get().fetchAccounts();
             set({ loading: false });
         } catch (error) {
