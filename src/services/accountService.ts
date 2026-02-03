@@ -28,6 +28,10 @@ export async function addAccount(email: string, refreshToken: string): Promise<A
     return await invoke('add_account', { email, refreshToken });
 }
 
+export async function addCodexAccount(label: string | null, apiKey: string): Promise<Account> {
+    return await invoke('add_codex_account', { label, apiKey });
+}
+
 export async function deleteAccount(accountId: string): Promise<void> {
     return await invoke('delete_account', { accountId });
 }
@@ -189,4 +193,3 @@ export interface ExportAccountsResponse {
 export async function exportAccounts(accountIds: string[]): Promise<ExportAccountsResponse> {
     return await invoke('export_accounts', { accountIds });
 }
-

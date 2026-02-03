@@ -199,7 +199,18 @@
             "tabs": {
                 "oauth": "OAuth 授权",
                 "token": "Refresh Token",
+                "codex": "Codex",
                 "import": "从数据库导入"
+            },
+            "codex": {
+                "title": "Codex",
+                "label": "账号标识（可选）",
+                "label_placeholder": "例如 codex-team",
+                "api_key": "Codex API Key",
+                "api_key_placeholder": "sk-...",
+                "hint": "使用 Codex API Key，账号标识用于列表展示。",
+                "btn_confirm": "添加 Codex 账号",
+                "error_api_key": "请填写 Codex API Key"
             },
             "oauth": {
                 "recommend": "推荐方式",

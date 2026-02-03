@@ -75,6 +75,44 @@ impl AccountService {
         Ok(account)
     }
 
+    /// 添加 Codex 账号 (API Key)
+    pub async fn add_codex_account(&self, label: Option<String>, api_key: &str) -> Result<Account, String> {
+        let sanitized_key = api_key.trim();
+        if sanitized_key.is_empty() {
+            return Err("Codex API Key 不能为空".to_string());
+        }
+
+        let key_suffix: String = sanitized_key.chars().rev().take(4).collect::<String>().chars().rev().collect();
+        let display_label = label
+            .as_ref()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| format!("codex-{}", key_suffix));
+
+        let token = TokenData::new(
+            sanitized_key.to_string(),
+            String::new(),
+            60 * 60 * 24 * 365 * 10, // 10 years
+            Some(display_label.clone()),
+            None,
+            None,
+        );
+
+        let account = modules::account::upsert_account_with_provider(
+            display_label.clone(),
+            None,
+            token,
+            "codex",
+        )?;
+
+        modules::logger::log_info(&format!(
+            "[Service] Added/Updated Codex account: {}",
+            account.email
+        ));
+
+        Ok(account)
+    }
+
     /// 删除账号逻辑
     pub fn delete_account(&self, account_id: &str) -> Result<(), String> {
         modules::delete_account(account_id)?;

@@ -2,6 +2,7 @@ export interface Account {
     id: string;
     email: string;
     name?: string;
+    provider?: string;
     token: TokenData;
     device_profile?: DeviceProfile;
     device_history?: DeviceProfileVersion[];
@@ -53,4 +54,3 @@ export interface DeviceProfileVersion {
     profile: DeviceProfile;
     is_current?: boolean;
 }
-

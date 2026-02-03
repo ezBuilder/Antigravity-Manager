@@ -8,6 +8,8 @@ pub struct Account {
     pub id: String,
     pub email: String,
     pub name: Option<String>,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub token: TokenData,
     /// 可选的设备指纹，用于切换账号时固定机器信息
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,6 +50,7 @@ impl Account {
             id,
             email,
             name: None,
+            provider: default_provider(),
             token,
             device_profile: None,
             device_history: Vec::new(),
@@ -87,6 +90,8 @@ pub struct AccountSummary {
     pub id: String,
     pub email: String,
     pub name: Option<String>,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     #[serde(default)]
     pub disabled: bool,
     #[serde(default)]
@@ -103,6 +108,10 @@ impl AccountIndex {
             current_account_id: None,
         }
     }
+}
+
+fn default_provider() -> String {
+    "google".to_string()
 }
 
 impl Default for AccountIndex {

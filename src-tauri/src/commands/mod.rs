@@ -42,6 +42,27 @@ pub async fn add_account(
     Ok(account)
 }
 
+/// 添加 Codex 账号
+#[tauri::command]
+pub async fn add_codex_account(
+    app: tauri::AppHandle,
+    label: Option<String>,
+    api_key: String,
+) -> Result<Account, String> {
+    let service = modules::account_service::AccountService::new(
+        crate::modules::integration::SystemManager::Desktop(app.clone())
+    );
+
+    let account = service.add_codex_account(label, &api_key).await?;
+
+    // 重载账号池
+    let _ = crate::commands::proxy::reload_proxy_accounts(
+        app.state::<crate::commands::proxy::ProxyServiceState>(),
+    ).await;
+
+    Ok(account)
+}
+
 /// 删除账号
 /// 删除账号
 #[tauri::command]
