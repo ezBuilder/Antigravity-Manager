@@ -231,6 +231,7 @@ pub async fn ensure_admin_server(
             config.debug_logging.clone(),
             integration.clone(),
             cloudflared_state,
+            config.pm_router.clone(),
         ).await {
             Ok((server, handle)) => (server, handle),
             Err(e) => return Err(format!("启动管理服务器失败: {}", e)),

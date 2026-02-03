@@ -710,7 +710,29 @@
             "pro_image_1_1": "이미지 생성 (1:1)",
             "claude_sonnet": "코드 추론 (Sonnet)",
             "claude_sonnet_thinking": "생각의 사슬 (Thinking)",
-            "claude_opus_thinking": "가장 강력한 생각 (Opus Thinking)"
+            "claude_opus_thinking": "가장 강력한 생각 (Opus Thinking)",
+            "codex": "코딩 최강",
+            "codex_max": "딥 디버깅",
+            "codex_mini": "라우터 전용"
+        },
+        "pm_router": {
+            "title": "PM Router (멀티모델 오케스트레이션)",
+            "subtitle": "클라이언트 모델 힌트를 무시하고 PM 에이전트가 최적 모델을 선택합니다.",
+            "enabled": "PM Router 사용",
+            "scope": "적용 범위",
+            "scope_cli": "CLI 전용",
+            "scope_all": "전체 요청",
+            "lite_model": "PM-lite 모델",
+            "pro_model": "PM-pro 모델",
+            "fallback_model": "Fallback 모델",
+            "context_limit": "컨텍스트 제한(문자)",
+            "context_hint": "라우터 에이전트로 보내는 프롬프트 길이를 제한합니다.",
+            "user_agents": "CLI User-Agent 키워드",
+            "user_agents_hint": "CLI 트래픽 감지를 위한 키워드(쉼표 구분).",
+            "pro_keywords": "에스컬레이션 키워드",
+            "pro_keywords_hint": "PM-pro 호출을 유도하는 키워드(쉼표 구분).",
+            "assignment_title": "기본 모델 배정",
+            "assignment_desc": "PRD 기준: coder/debug/review/architecture/docs/research/image"
         },
         "mapping": {
             "title": "Claude Code 모델 매핑",

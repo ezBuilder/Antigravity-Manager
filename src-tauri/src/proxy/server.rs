@@ -59,6 +59,7 @@ pub fn take_pending_reload_accounts() -> Vec<String> {
 pub struct AppState {
     pub token_manager: Arc<TokenManager>,
     pub custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    pub pm_router: Arc<RwLock<crate::proxy::PmRouterConfig>>,
     #[allow(dead_code)]
     pub request_timeout: u64, // API 请求超时(秒)
     #[allow(dead_code)]
@@ -173,6 +174,7 @@ fn to_account_response(
 pub struct AxumServer {
     shutdown_tx: Arc<tokio::sync::Mutex<Option<oneshot::Sender<()>>>>,
     custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    pm_router: Arc<RwLock<crate::proxy::PmRouterConfig>>,
     proxy_state: Arc<tokio::sync::RwLock<crate::proxy::config::UpstreamProxyConfig>>,
     upstream: Arc<crate::proxy::upstream::client::UpstreamClient>,
     security_state: Arc<RwLock<crate::proxy::ProxySecurityConfig>>,
@@ -191,6 +193,12 @@ impl AxumServer {
             *m = config.custom_mapping.clone();
         }
         tracing::debug!("模型映射 (Custom) 已全量热更新");
+    }
+
+    pub async fn update_pm_router(&self, config: &crate::proxy::config::ProxyConfig) {
+        let mut pm = self.pm_router.write().await;
+        *pm = config.pm_router.clone();
+        tracing::info!("PM Router 配置已热更新");
     }
 
     /// 更新代理配置
@@ -253,8 +261,10 @@ impl AxumServer {
         debug_logging: crate::proxy::config::DebugLoggingConfig,
         integration: crate::modules::integration::SystemManager,
         cloudflared_state: Arc<crate::commands::cloudflared::CloudflaredState>,
+        pm_router_config: crate::proxy::PmRouterConfig,
     ) -> Result<(Self, tokio::task::JoinHandle<()>), String> {
         let custom_mapping_state = Arc::new(tokio::sync::RwLock::new(custom_mapping));
+        let pm_router_state = Arc::new(RwLock::new(pm_router_config));
         let proxy_state = Arc::new(tokio::sync::RwLock::new(upstream_proxy.clone()));
         let security_state = Arc::new(RwLock::new(security_config));
         let zai_state = Arc::new(RwLock::new(zai_config));
@@ -267,6 +277,7 @@ impl AxumServer {
         let state = AppState {
             token_manager: token_manager.clone(),
             custom_mapping: custom_mapping_state.clone(),
+            pm_router: pm_router_state.clone(),
             request_timeout: 300, // 5分钟超时
             thought_signature_map: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -608,6 +619,7 @@ impl AxumServer {
         let server_instance = Self {
             shutdown_tx: Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
             custom_mapping: custom_mapping_state.clone(),
+            pm_router: pm_router_state.clone(),
             proxy_state,
             upstream: state.upstream.clone(),
             security_state,
@@ -2958,4 +2970,3 @@ async fn admin_update_security_config(
 
     Ok(StatusCode::OK)
 }
-

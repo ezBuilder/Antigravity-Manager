@@ -10,7 +10,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::proxy::mappers::claude::{
     transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
@@ -19,6 +19,7 @@ use crate::proxy::mappers::claude::{
     models::{Message, MessageContent},
 };
 use crate::proxy::server::AppState;
+use crate::proxy::pm_router;
 use crate::proxy::mappers::context_manager::ContextManager;
 use crate::proxy::mappers::estimation_calibrator::get_calibrator;
 use crate::proxy::debug_logger;
@@ -371,6 +372,41 @@ pub async fn handle_messages(
     
     // 3. 准备闭包
     let mut request_for_body = request.clone();
+    let original_model = request_for_body.model.clone();
+    let pm_router_config = state.pm_router.read().await.clone();
+    let should_route = pm_router::should_apply_router(&pm_router_config, &headers)
+        && detect_background_task_type(&request_for_body).is_none();
+
+    if should_route {
+        match pm_router::select_model_for_claude_request(
+            &state,
+            &pm_router_config,
+            &request_for_body,
+            &headers,
+            &trace_id,
+        )
+        .await
+        {
+            Ok(decision) => {
+                info!(
+                    "[{}][PM-Router] {} -> {} via {} | task={} | reason={}",
+                    trace_id,
+                    original_model,
+                    decision.selected_model,
+                    decision.used_router_model,
+                    decision.task_type,
+                    decision.reason
+                );
+                request_for_body.model = decision.selected_model;
+            }
+            Err(err) => {
+                warn!(
+                    "[{}][PM-Router] Routing failed: {} (fallback to request model {})",
+                    trace_id, err, original_model
+                );
+            }
+        }
+    }
     let token_manager = state.token_manager;
     
     let pool_size = token_manager.len();

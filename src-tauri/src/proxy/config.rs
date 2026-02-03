@@ -202,6 +202,107 @@ impl Default for ExperimentalConfig {
     }
 }
 
+// ============================================================================
+// PM Router Config (Multi-model Orchestration)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PmRouterScope {
+    /// Only apply PM routing to known CLI clients (e.g., Claude Code CLI).
+    CliOnly,
+    /// Apply PM routing to all proxy requests.
+    AllRequests,
+}
+
+impl Default for PmRouterScope {
+    fn default() -> Self {
+        Self::CliOnly
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PmRouterConfig {
+    /// Enable PM router (model selection before routing).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Scope for PM router application.
+    #[serde(default)]
+    pub scope: PmRouterScope,
+
+    /// PM-lite model (always called first).
+    #[serde(default = "default_pm_lite_model")]
+    pub pm_lite_model: String,
+
+    /// PM-pro model (conditional deep routing).
+    #[serde(default = "default_pm_pro_model")]
+    pub pm_pro_model: String,
+
+    /// Keywords that trigger PM-pro escalation.
+    #[serde(default)]
+    pub pro_keywords: Vec<String>,
+
+    /// Known CLI user-agent keywords.
+    #[serde(default)]
+    pub cli_user_agents: Vec<String>,
+
+    /// Maximum chars for routing context sent to PM model.
+    #[serde(default = "default_pm_context_limit")]
+    pub max_context_chars: usize,
+
+    /// Default fallback model when routing fails.
+    #[serde(default = "default_pm_fallback_model")]
+    pub fallback_model: String,
+}
+
+impl Default for PmRouterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scope: PmRouterScope::CliOnly,
+            pm_lite_model: default_pm_lite_model(),
+            pm_pro_model: default_pm_pro_model(),
+            pro_keywords: vec![
+                "security".to_string(),
+                "auth".to_string(),
+                "permission".to_string(),
+                "payment".to_string(),
+                "billing".to_string(),
+                "oauth".to_string(),
+                "refactor".to_string(),
+                "migration".to_string(),
+                "architecture".to_string(),
+                "design".to_string(),
+                "adr".to_string(),
+            ],
+            cli_user_agents: vec![
+                "claude-code".to_string(),
+                "claude-cli".to_string(),
+                "claude".to_string(),
+            ],
+            max_context_chars: default_pm_context_limit(),
+            fallback_model: default_pm_fallback_model(),
+        }
+    }
+}
+
+fn default_pm_lite_model() -> String {
+    "gpt-5.1-codex-mini".to_string()
+}
+
+fn default_pm_pro_model() -> String {
+    "claude-sonnet-4-5".to_string()
+}
+
+fn default_pm_fallback_model() -> String {
+    "gemini-2.5-flash".to_string()
+}
+
+fn default_pm_context_limit() -> usize {
+    4000
+}
+
 fn default_threshold_l1() -> f32 {
     0.4
 }
@@ -415,6 +516,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub experimental: ExperimentalConfig,
 
+    /// PM Router 配置 (多模型编排)
+    #[serde(default)]
+    pub pm_router: PmRouterConfig,
+
     /// 安全监控配置 (IP 黑白名单)
     #[serde(default)]
     pub security_monitor: SecurityMonitorConfig,
@@ -462,6 +567,7 @@ impl Default for ProxyConfig {
             zai: ZaiConfig::default(),
             scheduling: crate::proxy::sticky_config::StickySessionConfig::default(),
             experimental: ExperimentalConfig::default(),
+            pm_router: PmRouterConfig::default(),
             security_monitor: SecurityMonitorConfig::default(),
             preferred_account_id: None, // 默认使用轮询模式
             user_agent_override: None,

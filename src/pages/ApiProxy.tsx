@@ -140,6 +140,17 @@ export default function ApiProxy() {
 
     const { models } = useProxyModels();
 
+    const defaultPmRouterConfig: NonNullable<ProxyConfig['pm_router']> = {
+        enabled: true,
+        scope: 'cli_only',
+        pm_lite_model: 'gpt-5.1-codex-mini',
+        pm_pro_model: 'claude-sonnet-4-5',
+        fallback_model: 'gemini-2.5-flash',
+        max_context_chars: 4000,
+        cli_user_agents: ['claude-code', 'claude-cli', 'claude'],
+        pro_keywords: ['security', 'auth', 'permission', 'payment', 'billing', 'oauth', 'refactor', 'migration', 'architecture', 'design', 'adr']
+    };
+
     const [status, setStatus] = useState<ProxyStatus>({
         running: false,
         port: 0,
@@ -200,6 +211,13 @@ export default function ApiProxy() {
     const zaiModelMapping = useMemo(() => {
         return appConfig?.proxy.zai?.model_mapping || {};
     }, [appConfig?.proxy.zai?.model_mapping]);
+
+    const pmRouterConfig = useMemo(() => {
+        return {
+            ...defaultPmRouterConfig,
+            ...(appConfig?.proxy.pm_router || {})
+        };
+    }, [appConfig?.proxy.pm_router]);
 
 
     // 生成自定义映射表单的选项 (从 models 动态生成)
@@ -504,6 +522,15 @@ export default function ApiProxy() {
             }
         };
         saveConfig(newConfig);
+    };
+
+    const updatePmRouterConfig = (updates: Partial<NonNullable<ProxyConfig['pm_router']>>) => {
+        updateProxyConfig({
+            pm_router: {
+                ...pmRouterConfig,
+                ...updates
+            }
+        });
     };
 
     const updateSchedulingConfig = (updates: Partial<StickySessionConfig>) => {
@@ -2021,6 +2048,175 @@ print(response.text)`;
                             </div>
 
                             <div className="p-3 space-y-3">
+                                {/* PM Router */}
+                                <div className="bg-gradient-to-br from-blue-50/60 via-white to-purple-50/40 dark:from-blue-900/10 dark:via-base-100 dark:to-purple-900/10 border border-blue-100 dark:border-blue-900/40 rounded-xl p-4">
+                                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                                        <div className="space-y-1">
+                                            <h3 className="text-sm font-bold text-gray-900 dark:text-base-content flex items-center gap-2">
+                                                <Layers size={16} className="text-blue-500" />
+                                                {t('proxy.pm_router.title', { defaultValue: 'PM Router (Multi-Model Orchestration)' })}
+                                            </h3>
+                                            <p className="text-[11px] text-gray-500 dark:text-gray-400 max-w-2xl">
+                                                {t('proxy.pm_router.subtitle', { defaultValue: 'Ignore client model hints and let the PM agent select the best model before routing.' })}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                                                {t('proxy.pm_router.enabled', { defaultValue: 'Enable PM Router' })}
+                                            </span>
+                                            <input
+                                                type="checkbox"
+                                                className="toggle toggle-sm"
+                                                checked={pmRouterConfig.enabled}
+                                                onChange={(e) => updatePmRouterConfig({ enabled: e.target.checked })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                                        <div className="space-y-3">
+                                            <div className="space-y-1.5">
+                                                <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.scope', { defaultValue: 'Apply Scope' })}</label>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        className={cn(
+                                                            'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
+                                                            pmRouterConfig.scope === 'cli_only'
+                                                                ? 'bg-blue-500 text-white border-blue-500'
+                                                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-300'
+                                                        )}
+                                                        onClick={() => updatePmRouterConfig({ scope: 'cli_only' })}
+                                                    >
+                                                        {t('proxy.pm_router.scope_cli', { defaultValue: 'CLI Only' })}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className={cn(
+                                                            'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
+                                                            pmRouterConfig.scope === 'all_requests'
+                                                                ? 'bg-blue-500 text-white border-blue-500'
+                                                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-300'
+                                                        )}
+                                                        onClick={() => updatePmRouterConfig({ scope: 'all_requests' })}
+                                                    >
+                                                        {t('proxy.pm_router.scope_all', { defaultValue: 'All Requests' })}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                <div className="space-y-1">
+                                                    <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.lite_model', { defaultValue: 'PM-lite Model' })}</label>
+                                                    <GroupedSelect
+                                                        value={pmRouterConfig.pm_lite_model}
+                                                        onChange={(val) => updatePmRouterConfig({ pm_lite_model: val })}
+                                                        options={customMappingOptions}
+                                                        className="text-[11px]"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.pro_model', { defaultValue: 'PM-pro Model' })}</label>
+                                                    <GroupedSelect
+                                                        value={pmRouterConfig.pm_pro_model}
+                                                        onChange={(val) => updatePmRouterConfig({ pm_pro_model: val })}
+                                                        options={customMappingOptions}
+                                                        className="text-[11px]"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.fallback_model', { defaultValue: 'Fallback Model' })}</label>
+                                                    <GroupedSelect
+                                                        value={pmRouterConfig.fallback_model}
+                                                        onChange={(val) => updatePmRouterConfig({ fallback_model: val })}
+                                                        options={customMappingOptions}
+                                                        className="text-[11px]"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <div className="space-y-1">
+                                                <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.context_limit', { defaultValue: 'Context Limit (chars)' })}</label>
+                                                <input
+                                                    type="number"
+                                                    min={512}
+                                                    max={20000}
+                                                    value={pmRouterConfig.max_context_chars}
+                                                    onChange={(e) => updatePmRouterConfig({ max_context_chars: Number(e.target.value) })}
+                                                    className="input input-xs input-bordered w-full text-[11px] bg-white dark:bg-gray-800"
+                                                />
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.context_hint', { defaultValue: 'Used to cap the prompt sent to the router agent.' })}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.user_agents', { defaultValue: 'CLI User-Agent Keywords' })}</label>
+                                                <textarea
+                                                    value={pmRouterConfig.cli_user_agents.join(', ')}
+                                                    onChange={(e) => updatePmRouterConfig({
+                                                        cli_user_agents: e.target.value.split(',').map(v => v.trim()).filter(Boolean)
+                                                    })}
+                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800"
+                                                />
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.user_agents_hint', { defaultValue: 'Comma-separated keywords used to detect CLI traffic.' })}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">{t('proxy.pm_router.pro_keywords', { defaultValue: 'Escalation Keywords' })}</label>
+                                                <textarea
+                                                    value={pmRouterConfig.pro_keywords.join(', ')}
+                                                    onChange={(e) => updatePmRouterConfig({
+                                                        pro_keywords: e.target.value.split(',').map(v => v.trim()).filter(Boolean)
+                                                    })}
+                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800"
+                                                />
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.pro_keywords_hint', { defaultValue: 'Comma-separated keywords that trigger PM-pro routing.' })}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 bg-white/70 dark:bg-base-200/40 border border-gray-100 dark:border-base-200 rounded-xl p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Sparkles size={14} className="text-purple-500" />
+                                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                                {t('proxy.pm_router.assignment_title', { defaultValue: 'Default Model Assignments' })}
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">
+                                            {t('proxy.pm_router.assignment_desc', { defaultValue: 'Based on the PRD: coder/debug/review/architecture/docs/research/image agents.' })}
+                                        </p>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-gray-600 dark:text-gray-300">
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Coder</span>
+                                                <span className="font-mono">gpt-5.2-codex → claude-sonnet-4-5 → gemini-2.5-pro</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Debug</span>
+                                                <span className="font-mono">claude-sonnet-4-5-thinking → gpt-5.1-codex-max → gemini-2.5-pro</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Review</span>
+                                                <span className="font-mono">claude-sonnet-4-5 → gpt-5.2-codex → gemini-2.5-pro</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Architecture</span>
+                                                <span className="font-mono">claude-opus-4-5-thinking → gpt-5.1-codex-max → claude-sonnet-4-5-thinking</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Docs</span>
+                                                <span className="font-mono">claude-sonnet-4-5 → gpt-5.1-codex-mini → gemini-2.5-flash</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                                <span className="font-semibold">Research</span>
+                                                <span className="font-mono">gemini-2.5-pro → claude-sonnet-4-5 → gpt-5.1-codex-mini</span>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200 md:col-span-2">
+                                                <span className="font-semibold">Image/UI</span>
+                                                <span className="font-mono">gemini-3-pro-image → gemini-2.5-pro → gpt-5.2-codex</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* 精确映射管理 */}
                                 <div>
                                     {/* 后台任务模型配置 (Compact Mode) */}
