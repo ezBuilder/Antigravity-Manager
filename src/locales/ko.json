@@ -137,6 +137,11 @@
         "forbidden_badge": "403",
         "forbidden_tooltip": "API가 403 Forbidden을 반환했습니다. 계정에 Gemini Code Assist 권한이 없습니다.",
         "forbidden_msg": "권한 없음, 자동 새로고침 건너뜀",
+        "codex_usage_5h": "5시간",
+        "codex_usage_weekly": "주간",
+        "codex_usage_loading": "사용량 불러오는 중…",
+        "codex_used_suffix": "사용",
+        "codex_used_tooltip": "이 창(5시간/주간)에서 사용한 비율 (남은 양 아님)",
         "no_data": "데이터 없음",
         "last_used": "최근 사용",
         "reset_time": "초기화 시간",
@@ -199,7 +204,21 @@
             "tabs": {
                 "oauth": "OAuth",
                 "token": "Refresh Token",
+                "codex": "Codex",
                 "import": "DB 가져오기"
+            },
+            "codex": {
+                "title": "Codex",
+                "label": "계정 라벨 (선택)",
+                "label_placeholder": "예: codex-team",
+                "api_key": "Codex API 키",
+                "api_key_placeholder": "sk-...",
+                "hint": "Codex API 키를 사용합니다. 라벨은 목록에서 계정을 구분하는 데 사용됩니다.",
+                "oauth_btn": "Codex OAuth 로그인",
+                "oauth_hint": "브라우저에서 ChatGPT/Codex 로그인을 진행합니다. API 키 불필요.",
+                "or_api_key": "또는 API 키로 추가",
+                "btn_confirm": "Codex 계정 추가",
+                "error_api_key": "Codex API 키를 입력해주세요"
             },
             "oauth": {
                 "recommend": "추천",
@@ -718,6 +737,7 @@
         "pm_router": {
             "title": "PM Router (멀티모델 오케스트레이션)",
             "subtitle": "클라이언트 모델 힌트를 무시하고 PM 에이전트가 최적 모델을 선택합니다.",
+            "url_hint": "PM 라우터가 적용되려면 Claude Code 등의 API Base URL이 이 프록시 주소(아래 표시된 포트)를 가리켜야 합니다.",
             "enabled": "PM Router 사용",
             "scope": "적용 범위",
             "scope_cli": "CLI 전용",
@@ -911,7 +931,9 @@
             "tokens": "토큰 (입력/출력)",
             "time": "시간",
             "model": "모델",
-            "mapped_model": "매핑된 모델",
+            "request_model": "요청 모델",
+            "pm_selected_model": "PM 선택 모델",
+            "mapped_model": "실제 수행 모델",
             "protocol": "프로토콜",
             "account_used": "사용된 계정",
             "id": "요청 ID",

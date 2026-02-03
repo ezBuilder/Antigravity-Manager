@@ -1,0 +1,285 @@
+    Checking antigravity_tools v4.0.15 (/Users/ezbuilder/workspace/Antigravity-Manager/src-tauri)
+error[E0252]: the name `Message` is defined multiple times
+  --> src/proxy/handlers/claude.rs:25:28
+   |
+19 |     models::{Message, MessageContent},
+   |              ------- previous import of the type `Message` here
+...
+25 |     models::{ContentBlock, Message, MessageContent}, // [NEW] Needed for conversion
+   |                            ^^^^^^^--
+   |                            |
+   |                            `Message` reimported here
+   |                            help: remove unnecessary import
+   |
+   = note: `Message` must be defined only once in the type namespace of this module
+
+error[E0252]: the name `MessageContent` is defined multiple times
+  --> src/proxy/handlers/claude.rs:25:37
+   |
+19 |     models::{Message, MessageContent},
+   |                       -------------- previous import of the type `MessageContent` here
+...
+25 |     models::{ContentBlock, Message, MessageContent}, // [NEW] Needed for conversion
+   |                                     ^^^^^^^^^^^^^^ `MessageContent` reimported here
+   |
+   = note: `MessageContent` must be defined only once in the type namespace of this module
+
+error[E0432]: unresolved import `crate::proxy::handlers::router`
+  --> src/proxy/handlers/claude.rs:23:37
+   |
+23 | ...ndlers::{codex, router::{route_by_model, RouteTarget}}; // [NEW] Added handle...
+   |                    ^^^^^^ could not find `router` in `handlers`
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:670:33
+    |
+670 | ...stimated = ContextManager::estimate_token_usage(&request_with_mapped);
+    |               ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:684:20
+    |
+684 | ...   if ContextManager::trim_tool_messages(&mut request_with_mapped.messages, ...
+    |          ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:692:35
+    |
+692 | ...   let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
+    |                     ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:724:20
+    |
+724 |                 if ContextManager::compress_thinking_preserve_signature(
+    |                    ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:731:35
+    |
+731 | ...   let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
+    |                     ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:769:39
+    |
+769 | ...   let new_raw = ContextManager::estimate_token_usage(&request_with_mapped);
+    |                     ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+   --> src/proxy/handlers/claude.rs:804:13
+    |
+804 |             ContextManager::estimate_token_usage(&request_with_mapped)
+    |             ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+    |
+help: consider importing this struct
+    |
+  3 + use crate::proxy::mappers::context_manager::ContextManager;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `ContextManager`
+    --> src/proxy/handlers/claude.rs:1783:26
+     |
+1783 | ...gnature = ContextManager::extract_last_valid_signature(&original_request.me...
+     |              ^^^^^^^^^^^^^^ use of undeclared type `ContextManager`
+     |
+help: consider importing this struct
+     |
+   3 + use crate::proxy::mappers::context_manager::ContextManager;
+     |
+
+warning: unused imports: `AccountExportItem` and `AccountExportResponse`
+   --> src/proxy/server.rs:136:21
+    |
+136 | use crate::models::{AccountExportItem, AccountExportResponse};
+    |                     ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `MessageContent`, `Message`, and `utils::get_context_limit_for_model`
+  --> src/proxy/handlers/claude.rs:25:28
+   |
+25 |     models::{ContentBlock, Message, MessageContent}, // [NEW] Needed for conversion
+   |                            ^^^^^^^  ^^^^^^^^^^^^^^
+26 |     utils::get_context_limit_for_model, // [Existing]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `RetryStrategy`
+ --> src/proxy/handlers/gemini.rs:9:109
+  |
+9 | ...trategy, should_rotate_account, RetryStrategy};
+  |                                    ^^^^^^^^^^^^^
+
+warning: unused import: `tokio::time::Duration`
+  --> src/proxy/handlers/gemini.rs:11:5
+   |
+11 | use tokio::time::Duration;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `futures::StreamExt`
+  --> src/proxy/handlers/codex.rs:14:5
+   |
+14 | use futures::StreamExt;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `json`
+ --> src/proxy/mappers/openai/collector.rs:7:18
+  |
+7 | use serde_json::{json, Value};
+  |                  ^^^^
+
+warning: unused import: `std::io`
+ --> src/proxy/mappers/openai/collector.rs:9:5
+  |
+9 | use std::io;
+  |     ^^^^^^^
+
+warning: unused import: `body::Body`
+ --> src/proxy/middleware/ip_filter.rs:6:5
+  |
+6 |     body::Body,
+  |     ^^^^^^^^^^
+
+warning: unused import: `config::get_thinking_budget_config`
+  --> src/proxy/mod.rs:29:9
+   |
+29 | pub use config::get_thinking_budget_config;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `config::PmRouterScope`
+  --> src/proxy/mod.rs:34:9
+   |
+34 | pub use config::PmRouterScope;
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `config::ThinkingBudgetConfig`
+  --> src/proxy/mod.rs:35:9
+   |
+35 | pub use config::ThinkingBudgetConfig;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `config::ThinkingBudgetMode`
+  --> src/proxy/mod.rs:36:9
+   |
+36 | pub use config::ThinkingBudgetMode;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+    --> src/proxy/handlers/openai.rs:1826:9
+     |
+1826 |     let mut reference_images: Vec<String> = Vec::new(); // Store base64 data o...
+     |         ----^^^^^^^^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src/proxy/handlers/openai.rs:1953:10
+     |
+1953 |     let (mut image_config, _) = crate::proxy::mappers::common_utils::parse_ima...
+     |          ----^^^^^^^^^^^^
+     |          |
+     |          help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src/proxy/handlers/openai.rs:2003:9
+     |
+2003 |     let mut gemini_body = json!({
+     |         ----^^^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+error[E0282]: type annotations needed
+    --> src/proxy/handlers/claude.rs:1786:74
+     |
+1786 | ...ture (len: {})", trace_id, sig.len());
+     |                               ^^^ cannot infer type
+
+warning: unused import: `futures::TryFutureExt`
+  --> src/proxy/server.rs:11:5
+   |
+11 | use futures::TryFutureExt;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `id`
+    --> src/proxy/server.rs:1368:10
+     |
+1368 |     Path(id): Path<String>,
+     |          ^^ help: if this is intentional, prefix it with an underscore: `_id`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `state`
+    --> src/proxy/server.rs:2960:11
+     |
+2960 |     State(state): State<AppState>,
+     |           ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: value assigned to `wait_ms` is never read
+    --> src/proxy/token_manager.rs:1274:39
+     |
+1274 |                     let mut wait_ms = 0;
+     |                                       ^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `schema`
+  --> src/proxy/common/tool_adapter.rs:26:27
+   |
+26 |     fn pre_process(&self, schema: &mut Value) -> Result<(), String> {
+   |                           ^^^^^^ help: if this is intentional, prefix it with an underscore: `_schema`
+
+warning: unused variable: `schema`
+  --> src/proxy/common/tool_adapter.rs:39:28
+   |
+39 |     fn post_process(&self, schema: &mut Value) -> Result<(), String> {
+   |                            ^^^^^^ help: if this is intentional, prefix it with an underscore: `_schema`
+
+warning: unused variable: `reference_images`
+    --> src/proxy/handlers/openai.rs:1826:9
+     |
+1826 |     let mut reference_images: Vec<String> = Vec::new(); // Store base64 data o...
+     |         ^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_reference_images`
+
+warning: unused variable: `retry_after`
+   --> src/proxy/handlers/gemini.rs:352:13
+    |
+352 |         let retry_after = response.headers().get("Retry-After").and_then(|h| h....
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_retry_after`
+
+Some errors have detailed explanations: E0252, E0282, E0432, E0433.
+For more information about an error, try `rustc --explain E0252`.
+warning: `antigravity_tools` (lib) generated 23 warnings
+error: could not compile `antigravity_tools` (lib) due to 12 previous errors; 23 warnings emitted

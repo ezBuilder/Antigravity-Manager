@@ -21,6 +21,7 @@ interface ProxyRequestLog {
     duration: number;
     model?: string;
     mapped_model?: string;
+    pm_selected_model?: string;  // PM 라우터가 선택한 모델 (있을 때만)
     error?: string;
     request_body?: string;
     response_body?: string;
@@ -85,10 +86,12 @@ const LogTable: React.FC<LogTableProps> = ({
                                 </span>
                             </td>
                             <td className="font-bold" style={{ width: '60px' }}>{log.method}</td>
-                            <td className="text-blue-600 truncate" style={{ width: '220px', maxWidth: '220px' }}>
-                                {log.mapped_model && log.model !== log.mapped_model
-                                    ? `${log.model} => ${log.mapped_model}`
-                                    : (log.model || '-')}
+                            <td className="text-blue-600 truncate" style={{ width: '220px', maxWidth: '220px' }} title={log.pm_selected_model ? `${log.model || ''} → PM: ${log.pm_selected_model} → ${log.mapped_model || ''}` : undefined}>
+                                {log.pm_selected_model
+                                    ? `${log.model || '-'} → ${log.pm_selected_model} → ${log.mapped_model || '-'}`
+                                    : log.mapped_model && log.model !== log.mapped_model
+                                        ? `${log.model} => ${log.mapped_model}`
+                                        : (log.model || '-')}
                             </td>
                             <td style={{ width: '70px' }}>
                                 {log.protocol && (
@@ -279,7 +282,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
         fetchAccounts();
 
         let unlistenFn: (() => void) | null = null;
-        let updateTimeout: number | null = null;
+        let updateTimeout: ReturnType<typeof setTimeout> | null = null;
 
         const setupListener = async () => {
             if (!isTauri()) return;
@@ -614,10 +617,16 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                                             </div>
                                         )}
                                         <div className="space-y-1.5">
-                                            <span className="block text-gray-500 dark:text-gray-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.model')}</span>
+                                            <span className="block text-gray-500 dark:text-gray-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.request_model')}</span>
                                             <span className="font-mono font-black text-blue-600 dark:text-blue-400 break-all text-sm">{selectedLog.model || '-'}</span>
                                         </div>
-                                        {selectedLog.mapped_model && selectedLog.model !== selectedLog.mapped_model && (
+                                        {selectedLog.pm_selected_model && (
+                                            <div className="space-y-1.5">
+                                                <span className="block text-gray-500 dark:text-gray-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.pm_selected_model')}</span>
+                                                <span className="font-mono font-black text-amber-600 dark:text-amber-400 break-all text-sm">{selectedLog.pm_selected_model}</span>
+                                            </div>
+                                        )}
+                                        {selectedLog.mapped_model && (selectedLog.model !== selectedLog.mapped_model || selectedLog.pm_selected_model) && (
                                             <div className="space-y-1.5">
                                                 <span className="block text-gray-500 dark:text-gray-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.mapped_model')}</span>
                                                 <span className="font-mono font-black text-green-600 dark:text-green-400 break-all text-sm">{selectedLog.mapped_model}</span>

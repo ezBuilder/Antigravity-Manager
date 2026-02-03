@@ -111,6 +111,14 @@ pub fn should_escalate_to_pro(config: &PmRouterConfig, context: &str) -> bool {
         .any(|kw| lower.contains(&kw.to_lowercase()))
 }
 
+/// Codex 토큰 부재 등으로 라우터 모델 호출이 실패했는지 판별
+fn is_router_token_unavailable(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("token pool is empty")
+        || lower.contains("provider: codex")
+        || lower.contains("token error")
+}
+
 pub async fn select_model_for_claude_request(
     state: &AppState,
     config: &PmRouterConfig,
@@ -121,30 +129,52 @@ pub async fn select_model_for_claude_request(
     let context = build_router_context(request, config.max_context_chars);
     let prompt = build_router_prompt(request, headers, &context);
 
-    let lite_response = call_router_model(state, &config.pm_lite_model, &prompt).await?;
+    let (lite_response, used_lite_model) = match call_router_model(state, &config.pm_lite_model, &prompt).await {
+        Ok(r) => (r, config.pm_lite_model.clone()),
+        Err(e) if is_codex_model(&config.pm_lite_model) && is_router_token_unavailable(&e) => {
+            info!(
+                "[{}][PM-Router] Codex router unavailable ({}), using fallback router: {}",
+                trace_id, config.pm_lite_model, config.fallback_model
+            );
+            let r = call_router_model(state, &config.fallback_model, &prompt).await?;
+            (r, config.fallback_model.clone())
+        }
+        Err(e) => return Err(e),
+    };
+
     let parsed_lite = parse_router_response(&lite_response)?;
     let mut selected = validate_router_model(&parsed_lite.selected_model, config);
-    let mut used_router_model = config.pm_lite_model.clone();
+    let mut used_router_model = used_lite_model;
     let mut used_pro = false;
 
     if parsed_lite.needs_pro || should_escalate_to_pro(config, &context) {
         let pro_prompt = build_router_prompt(request, headers, &context);
-        match call_router_model(state, &config.pm_pro_model, &pro_prompt).await {
-            Ok(pro_response) => {
-                if let Ok(parsed_pro) = parse_router_response(&pro_response) {
-                    selected = validate_router_model(&parsed_pro.selected_model, config);
-                    used_router_model = config.pm_pro_model.clone();
-                    used_pro = true;
-                    info!(
-                        "[{}][PM-Router] Escalated to PM-pro ({} -> {})",
-                        trace_id, config.pm_lite_model, config.pm_pro_model
-                    );
-                }
+        let (pro_response, used_pro_model_opt) = match call_router_model(state, &config.pm_pro_model, &pro_prompt).await {
+            Ok(r) => (r, Some(config.pm_pro_model.clone())),
+            Err(e) if is_codex_model(&config.pm_pro_model) && is_router_token_unavailable(&e) => {
+                info!(
+                    "[{}][PM-Router] Codex PM-pro unavailable ({}), using fallback: {}",
+                    trace_id, config.pm_pro_model, config.fallback_model
+                );
+                let r = call_router_model(state, &config.fallback_model, &pro_prompt).await?;
+                (r, Some(config.fallback_model.clone()))
             }
             Err(err) => {
                 warn!(
                     "[{}][PM-Router] PM-pro failed: {} (falling back to PM-lite)",
                     trace_id, err
+                );
+                (String::new(), None)
+            }
+        };
+        if let Some(pro_model_used) = used_pro_model_opt {
+            if let Ok(parsed_pro) = parse_router_response(&pro_response) {
+                selected = validate_router_model(&parsed_pro.selected_model, config);
+                used_router_model = pro_model_used;
+                used_pro = true;
+                info!(
+                    "[{}][PM-Router] Escalated to PM-pro ({} -> {})",
+                    trace_id, config.pm_lite_model, config.pm_pro_model
                 );
             }
         }
@@ -285,7 +315,7 @@ async fn call_openai_router_model(
     model: &str,
     prompt: &str,
 ) -> Result<String, String> {
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
     let (api_key, _project_id, _email, _wait_ms) = token_manager
         .get_token("codex", false, None, model)
         .await?;
@@ -334,7 +364,7 @@ async fn call_gemini_router_model(
     model: &str,
     prompt: &str,
 ) -> Result<String, String> {
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
     let (access_token, project_id, _email, _wait_ms) = token_manager
         .get_token("agent", false, None, model)
         .await?;

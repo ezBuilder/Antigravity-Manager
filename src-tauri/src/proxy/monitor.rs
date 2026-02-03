@@ -14,6 +14,7 @@ pub struct ProxyRequestLog {
     pub duration: u64, // ms
     pub model: Option<String>,        // 客户端请求的模型名
     pub mapped_model: Option<String>, // 实际路由后使用的模型名
+    pub pm_selected_model: Option<String>, // PM 라우터가 선택한 모델 (있을 때만)
     pub account_email: Option<String>,
     pub client_ip: Option<String>,    // 客户端 IP 地址
     pub error: Option<String>,
@@ -168,6 +169,7 @@ impl ProxyMonitor {
                 duration: log.duration,
                 model: log.model.clone(),
                 mapped_model: log.mapped_model.clone(),
+                pm_selected_model: log.pm_selected_model.clone(),
                 account_email: log.account_email.clone(),
                 client_ip: log.client_ip.clone(),
                 error: log.error.clone(),

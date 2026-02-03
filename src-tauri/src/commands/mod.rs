@@ -5,6 +5,8 @@ use tauri::{Emitter, Manager};
 
 // 导出 proxy 命令
 pub mod proxy;
+// 导出 codex 命令 (OAuth 브라우저 인증)
+pub mod codex;
 // 导出 autostart 命令
 pub mod autostart;
 // 导出 cloudflared 命令
@@ -33,27 +35,6 @@ pub async fn add_account(
 
     // 自动刷新配额
     let _ = internal_refresh_account_quota(&app, &mut account).await;
-
-    // 重载账号池
-    let _ = crate::commands::proxy::reload_proxy_accounts(
-        app.state::<crate::commands::proxy::ProxyServiceState>(),
-    ).await;
-
-    Ok(account)
-}
-
-/// 添加 Codex 账号
-#[tauri::command]
-pub async fn add_codex_account(
-    app: tauri::AppHandle,
-    label: Option<String>,
-    api_key: String,
-) -> Result<Account, String> {
-    let service = modules::account_service::AccountService::new(
-        crate::modules::integration::SystemManager::Desktop(app.clone())
-    );
-
-    let account = service.add_codex_account(label, &api_key).await?;
 
     // 重载账号池
     let _ = crate::commands::proxy::reload_proxy_accounts(

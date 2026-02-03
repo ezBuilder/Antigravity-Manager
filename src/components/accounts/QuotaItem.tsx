@@ -9,24 +9,31 @@ interface QuotaItemProps {
     percentage: number;
     resetTime?: string;
     isProtected?: boolean;
+    /** Codex: percentage = 사용량(used). remaining이면 높을수록 좋음, used면 낮을수록 좋음 */
+    variant?: 'remaining' | 'used';
     className?: string;
 }
 
-export function QuotaItem({ label, percentage, resetTime, isProtected, className }: QuotaItemProps) {
+/** 사용량(used)일 때: 낮을수록 여유 → success, 높을수록 한도 근접 → error */
+function getUsedPercentColor(p: number): string {
+    if (p < 20) return 'success';
+    if (p < 50) return 'warning';
+    return 'error';
+}
+
+export function QuotaItem({ label, percentage, resetTime, isProtected, variant = 'remaining', className }: QuotaItemProps) {
     const { t } = useTranslation();
-    const getBgColorClass = (p: number) => {
-        const color = getQuotaColor(p);
-        switch (color) {
+    const color = variant === 'used' ? getUsedPercentColor(percentage) : getQuotaColor(percentage);
+    const getBgColorClass = (c: string) => {
+        switch (c) {
             case 'success': return 'bg-emerald-500';
             case 'warning': return 'bg-amber-500';
             case 'error': return 'bg-rose-500';
             default: return 'bg-gray-500';
         }
     };
-
-    const getTextColorClass = (p: number) => {
-        const color = getQuotaColor(p);
-        switch (color) {
+    const getTextColorClass = (c: string) => {
+        switch (c) {
             case 'success': return 'text-emerald-600 dark:text-emerald-400';
             case 'warning': return 'text-amber-600 dark:text-amber-400';
             case 'error': return 'text-rose-600 dark:text-rose-400';
@@ -53,7 +60,7 @@ export function QuotaItem({ label, percentage, resetTime, isProtected, className
             <div
                 className={cn(
                     "absolute inset-y-0 left-0 transition-all duration-700 ease-out opacity-15 dark:opacity-20",
-                    getBgColorClass(percentage)
+                    getBgColorClass(color)
                 )}
                 style={{ width: `${percentage}%` }}
             />
@@ -77,12 +84,12 @@ export function QuotaItem({ label, percentage, resetTime, isProtected, className
                     )}
                 </div>
 
-                {/* Percentage */}
-                <span className={cn("w-[28px] text-right font-bold transition-colors flex items-center justify-end gap-0.5 shrink-0", getTextColorClass(percentage))}>
+                {/* Percentage (remaining = 남은 할당, used = 사용량) */}
+                <span className={cn("text-right font-bold transition-colors flex items-center justify-end gap-0.5 shrink-0 min-w-[52px]", getTextColorClass(color))} title={variant === 'used' ? t('accounts.codex_used_tooltip', 'Used in this window') : undefined}>
                     {isProtected && (
                         <span title={t('accounts.quota_protected')}><Lock className="w-2.5 h-2.5 text-amber-500" /></span>
                     )}
-                    {percentage}%
+                    {percentage}%{variant === 'used' ? ` ${t('accounts.codex_used_suffix', 'used')}` : ''}
                 </span>
             </div>
         </div>

@@ -50,6 +50,7 @@ pub fn init_db() -> Result<(), String> {
     let _ = conn.execute("ALTER TABLE request_logs ADD COLUMN mapped_model TEXT", []);
     let _ = conn.execute("ALTER TABLE request_logs ADD COLUMN protocol TEXT", []);
     let _ = conn.execute("ALTER TABLE request_logs ADD COLUMN client_ip TEXT", []);
+    let _ = conn.execute("ALTER TABLE request_logs ADD COLUMN pm_selected_model TEXT", []);
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_timestamp ON request_logs (timestamp DESC)",
@@ -69,8 +70,8 @@ pub fn save_log(log: &ProxyRequestLog) -> Result<(), String> {
     let conn = connect_db()?;
 
     conn.execute(
-        "INSERT INTO request_logs (id, timestamp, method, url, status, duration, model, error, request_body, response_body, input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        "INSERT INTO request_logs (id, timestamp, method, url, status, duration, model, error, request_body, response_body, input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip, pm_selected_model)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             log.id,
             log.timestamp,
@@ -88,6 +89,7 @@ pub fn save_log(log: &ProxyRequestLog) -> Result<(), String> {
             log.mapped_model,
             log.protocol,
             log.client_ip,
+            log.pm_selected_model,
         ],
     ).map_err(|e| e.to_string())?;
 
@@ -101,7 +103,7 @@ pub fn get_logs_summary(limit: usize, offset: usize) -> Result<Vec<ProxyRequestL
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 NULL as request_body, NULL as response_body,
-                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip
+                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          ORDER BY timestamp DESC 
          LIMIT ?1 OFFSET ?2"
@@ -117,6 +119,7 @@ pub fn get_logs_summary(limit: usize, offset: usize) -> Result<Vec<ProxyRequestL
             duration: row.get(5)?,
             model: row.get(6)?,
             mapped_model: row.get(13).unwrap_or(None),
+            pm_selected_model: row.get(16).unwrap_or(None),
             account_email: row.get(12).unwrap_or(None),
             error: row.get(7)?,
             request_body: None,  // Don't query large fields for list view
@@ -169,7 +172,7 @@ pub fn get_log_detail(log_id: &str) -> Result<ProxyRequestLog, String> {
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 request_body, response_body, input_tokens, output_tokens, 
-                account_email, mapped_model, protocol, client_ip
+                account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
@@ -184,6 +187,7 @@ pub fn get_log_detail(log_id: &str) -> Result<ProxyRequestLog, String> {
             duration: row.get(5)?,
             model: row.get(6)?,
             mapped_model: row.get(13).unwrap_or(None),
+            pm_selected_model: row.get(16).unwrap_or(None),
             account_email: row.get(12).unwrap_or(None),
             error: row.get(7)?,
             request_body: row.get(8).unwrap_or(None),
@@ -288,7 +292,7 @@ pub fn get_logs_filtered(filter: &str, errors_only: bool, limit: usize, offset: 
     let sql = if errors_only {
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 NULL as request_body, NULL as response_body,
-                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip
+                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          WHERE (status < 200 OR status >= 400)
          ORDER BY timestamp DESC 
@@ -296,14 +300,14 @@ pub fn get_logs_filtered(filter: &str, errors_only: bool, limit: usize, offset: 
     } else if filter.is_empty() {
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 NULL as request_body, NULL as response_body,
-                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip
+                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          ORDER BY timestamp DESC 
          LIMIT ?1 OFFSET ?2"
     } else {
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 NULL as request_body, NULL as response_body,
-                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip
+                input_tokens, output_tokens, account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          WHERE (url LIKE ?3 OR method LIKE ?3 OR model LIKE ?3 OR CAST(status AS TEXT) LIKE ?3 OR account_email LIKE ?3 OR client_ip LIKE ?3)
          ORDER BY timestamp DESC 
@@ -322,6 +326,7 @@ pub fn get_logs_filtered(filter: &str, errors_only: bool, limit: usize, offset: 
                 duration: row.get(5)?,
                 model: row.get(6)?,
                 mapped_model: row.get(13).unwrap_or(None),
+                pm_selected_model: row.get(16).unwrap_or(None),
                 account_email: row.get(12).unwrap_or(None),
                 error: row.get(7)?,
                 request_body: None,
@@ -346,6 +351,7 @@ pub fn get_logs_filtered(filter: &str, errors_only: bool, limit: usize, offset: 
                 duration: row.get(5)?,
                 model: row.get(6)?,
                 mapped_model: row.get(13).unwrap_or(None),
+                pm_selected_model: row.get(16).unwrap_or(None),
                 account_email: row.get(12).unwrap_or(None),
                 error: row.get(7)?,
                 request_body: None,
@@ -370,6 +376,7 @@ pub fn get_logs_filtered(filter: &str, errors_only: bool, limit: usize, offset: 
                 duration: row.get(5)?,
                 model: row.get(6)?,
                 mapped_model: row.get(13).unwrap_or(None),
+                pm_selected_model: row.get(16).unwrap_or(None),
                 account_email: row.get(12).unwrap_or(None),
                 error: row.get(7)?,
                 request_body: None,
@@ -394,7 +401,7 @@ pub fn get_all_logs_for_export() -> Result<Vec<ProxyRequestLog>, String> {
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, method, url, status, duration, model, error, 
                 request_body, response_body, input_tokens, output_tokens, 
-                account_email, mapped_model, protocol, client_ip
+                account_email, mapped_model, protocol, client_ip, pm_selected_model
          FROM request_logs 
          ORDER BY timestamp DESC"
     ).map_err(|e| e.to_string())?;
@@ -409,6 +416,7 @@ pub fn get_all_logs_for_export() -> Result<Vec<ProxyRequestLog>, String> {
             duration: row.get(5)?,
             model: row.get(6)?,
             mapped_model: row.get(13).unwrap_or(None),
+            pm_selected_model: row.get(16).unwrap_or(None),
             account_email: row.get(12).unwrap_or(None),
             error: row.get(7)?,
             request_body: row.get(8).unwrap_or(None),

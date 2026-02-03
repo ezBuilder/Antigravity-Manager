@@ -8,12 +8,15 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 use tracing::{debug, error, info}; // Import Engine trait for encode method
 
+use crate::proxy::common::model_mapping::resolve_codex_model;
+use crate::proxy::handlers::codex; // [NEW] Codex handler
 use crate::proxy::mappers::openai::{
     transform_openai_request, transform_openai_response, OpenAIRequest,
 };
 // use crate::proxy::upstream::client::UpstreamClient; // 通过 state 获取
 use crate::proxy::server::AppState;
 use crate::proxy::debug_logger;
+use reqwest::header::USER_AGENT;
 
 const MAX_RETRY_ATTEMPTS: usize = 3;
 use super::common::{
@@ -22,15 +25,20 @@ use super::common::{
 use crate::proxy::session_manager::SessionManager;
 use tokio::time::Duration;
 
+const CODEX_USER_AGENT: &str = "codex-cli/1.0.0";
+
 async fn handle_codex_passthrough(
     state: &AppState,
-    body: Value,
+    mut body: Value,
     model: &str,
     stream: bool,
     session_id: String,
     endpoint: &str,
 ) -> Result<Response, (StatusCode, String)> {
-    let token_manager = state.token_manager;
+    let model_to_send = resolve_codex_model(model);
+    body["model"] = serde_json::json!(model_to_send);
+
+    let token_manager = state.token_manager.clone();
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size.saturating_add(1)).max(1);
 
@@ -42,7 +50,7 @@ async fn handle_codex_passthrough(
 
     for attempt in 0..max_attempts {
         let (api_key, _project_id, email, _wait_ms) = match token_manager
-            .get_token("codex", attempt > 0, Some(&session_id), model)
+            .get_token("codex", attempt > 0, Some(&session_id), model_to_send)
             .await
         {
             Ok(t) => t,
@@ -55,6 +63,7 @@ async fn handle_codex_passthrough(
 
         let request = client
             .post(&url)
+            .header(USER_AGENT, CODEX_USER_AGENT)
             .bearer_auth(api_key)
             .json(&body);
 
@@ -80,7 +89,7 @@ async fn handle_codex_passthrough(
                     .header("Connection", "keep-alive")
                     .header("X-Accel-Buffering", "no")
                     .header("X-Account-Email", &email)
-                    .header("X-Mapped-Model", model)
+                    .header("X-Mapped-Model", model_to_send)
                     .body(body)
                     .unwrap()
                     .into_response());
@@ -94,7 +103,7 @@ async fn handle_codex_passthrough(
                 StatusCode::OK,
                 [
                     ("X-Account-Email", email.as_str()),
-                    ("X-Mapped-Model", model),
+                    ("X-Mapped-Model", model_to_send),
                 ],
                 Json(payload),
             )
@@ -173,8 +182,16 @@ pub async fn handle_chat_completions(
         }
     }
 
-    let mut openai_req: OpenAIRequest = serde_json::from_value(body)
+    let mut openai_req: OpenAIRequest = serde_json::from_value(body.clone())
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
+
+    // [Restored] Auto-Route Codex models to Codex handler
+    if codex::should_use_codex(&openai_req.model) {
+        info!("[Auto-Route] 🔀 {} → Codex (ChatGPT)", openai_req.model);
+        return codex::handle_codex_chat(State(state), Json(body))
+            .await
+            .map(|r| r.into_response());
+    }
 
     if crate::proxy::common::model_mapping::is_codex_model(&openai_req.model) {
         let session_id = SessionManager::extract_openai_session_id(&openai_req);
@@ -226,7 +243,7 @@ pub async fn handle_chat_completions(
 
     // 1. 获取 UpstreamClient (Clone handle)
     let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
     let pool_size = token_manager.len();
     // [FIX] Ensure max_attempts is at least 2 to allow for internal retries
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size.saturating_add(1)).max(2);
@@ -726,8 +743,8 @@ pub async fn handle_completions(
 
     let is_codex_style = body.get("input").is_some() || body.get("instructions").is_some();
 
-    if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
-        if crate::proxy::common::model_mapping::is_codex_model(model) {
+    if let Some(model) = body.get("model").and_then(|v| v.as_str()).map(String::from) {
+        if crate::proxy::common::model_mapping::is_codex_model(&model) {
             let openai_req: OpenAIRequest = match serde_json::from_value(body.clone()) {
                 Ok(req) => req,
                 Err(e) => {
@@ -740,7 +757,7 @@ pub async fn handle_completions(
             return match handle_codex_passthrough(
                 &state,
                 body,
-                model,
+                &model,
                 openai_req.stream,
                 session_id,
                 endpoint,
@@ -1119,7 +1136,7 @@ pub async fn handle_completions(
     }
 
     let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
     let pool_size = token_manager.len();
     // [FIX] Ensure max_attempts is at least 2 to allow for internal retries
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size.saturating_add(1)).max(2);
@@ -1630,7 +1647,7 @@ pub async fn handle_images_generations(
 
     // 4. 获取 Token
     let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
 
     let (access_token, project_id, email, _wait_ms) = match token_manager
         .get_token("image_gen", false, None, "dall-e-3")
@@ -1904,7 +1921,7 @@ pub async fn handle_images_edits(
 
     // 1. Get Upstream & Token
     let upstream = state.upstream.clone();
-    let token_manager = state.token_manager;
+    let token_manager = state.token_manager.clone();
     let (access_token, project_id, email, _wait_ms) = match token_manager
         .get_token("image_gen", false, None, "dall-e-3")
         .await

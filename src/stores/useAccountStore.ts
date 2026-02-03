@@ -13,6 +13,8 @@ interface AccountState {
     fetchCurrentAccount: () => Promise<void>;
     addAccount: (email: string, refreshToken: string) => Promise<void>;
     addCodexAccount: (label: string | null, apiKey: string) => Promise<void>;
+    /** Codex OAuth 브라우저 로그인 (완료까지 대기) */
+    startCodexOAuthAndWait: (accountName: string) => Promise<accountService.CodexAccountInfo>;
     deleteAccount: (accountId: string) => Promise<void>;
     deleteAccounts: (accountIds: string[]) => Promise<void>;
     switchAccount: (accountId: string) => Promise<void>;
@@ -42,8 +44,16 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     fetchAccounts: async () => {
         set({ loading: true, error: null });
         try {
-            console.log('[Store] Fetching accounts...');
-            const accounts = await accountService.listAccounts();
+            const [antigravity, codexList, codexUsageList] = await Promise.all([
+                accountService.listAccounts(),
+                accountService.listCodexAccounts().catch(() => [] as accountService.CodexAccountInfo[]),
+                accountService.getAllCodexUsage().catch(() => []),
+            ]);
+            const usageByAccountId = new Map(codexUsageList.map((u) => [u.account_id, u]));
+            const codexAsAccounts = codexList.map((c) =>
+                accountService.codexToAccountLike(c, usageByAccountId.get(c.id)),
+            );
+            const accounts = [...antigravity, ...codexAsAccounts];
             set({ accounts, loading: false });
         } catch (error) {
             console.error('[Store] Fetch accounts failed:', error);
@@ -85,10 +95,28 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         }
     },
 
+    startCodexOAuthAndWait: async (accountName: string) => {
+        set({ loading: true, error: null });
+        try {
+            const info = await accountService.startCodexOAuthAndWait(accountName);
+            await get().fetchAccounts();
+            set({ loading: false });
+            return info;
+        } catch (error) {
+            set({ error: String(error), loading: false });
+            throw error;
+        }
+    },
+
     deleteAccount: async (accountId: string) => {
         set({ loading: true, error: null });
         try {
-            await accountService.deleteAccount(accountId);
+            const account = get().accounts.find((a) => a.id === accountId);
+            if (account?.provider === 'Codex') {
+                await accountService.deleteCodexAccount(accountId);
+            } else {
+                await accountService.deleteAccount(accountId);
+            }
             await Promise.all([
                 get().fetchAccounts(),
                 get().fetchCurrentAccount()
@@ -103,7 +131,13 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     deleteAccounts: async (accountIds: string[]) => {
         set({ loading: true, error: null });
         try {
-            await accountService.deleteAccounts(accountIds);
+            const accounts = get().accounts;
+            const codexIds = accountIds.filter((id) => accounts.find((a) => a.id === id)?.provider === 'Codex');
+            const antigravityIds = accountIds.filter((id) => !codexIds.includes(id));
+            await Promise.all([
+                ...codexIds.map((id) => accountService.deleteCodexAccount(id)),
+                antigravityIds.length ? accountService.deleteAccounts(antigravityIds) : Promise.resolve(),
+            ]);
             await Promise.all([
                 get().fetchAccounts(),
                 get().fetchCurrentAccount()
@@ -116,6 +150,10 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     switchAccount: async (accountId: string) => {
+        const account = get().accounts.find((a) => a.id === accountId);
+        if (account?.provider === 'Codex') {
+            return;
+        }
         set({ loading: true, error: null });
         try {
             await accountService.switchAccount(accountId);
@@ -128,9 +166,16 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     refreshQuota: async (accountId: string) => {
+        const account = get().accounts.find((a) => a.id === accountId);
         set({ loading: true, error: null });
         try {
-            await accountService.fetchAccountQuota(accountId);
+            if (account?.provider === 'Codex') {
+                // Codex 계정: 토큰 갱신 + 사용량 재조회
+                await accountService.refreshCodexAccount(accountId);
+            } else {
+                // Antigravity 계정: 기존 로직
+                await accountService.fetchAccountQuota(accountId);
+            }
             await get().fetchAccounts();
             set({ loading: false });
         } catch (error) {

@@ -105,6 +105,13 @@ pub async fn monitor_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // Extract PM-selected model from X-PM-Selected-Model header (when PM Router was used)
+    let pm_selected_model = response
+        .headers()
+        .get("X-PM-Selected-Model")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     // Determine protocol from URL path
     let protocol = if uri.contains("/v1/messages") {
         Some("anthropic".to_string())
@@ -128,6 +135,7 @@ pub async fn monitor_middleware(
         duration,
         model,
         mapped_model,
+        pm_selected_model,
         account_email,
         client_ip,
         error: None,

@@ -93,6 +93,24 @@ pub fn is_codex_model(input: &str) -> bool {
     )
 }
 
+/// Codex 요청 시 OpenAI로 보낼 공식 모델명으로 정규화 (old codex handler 호환)
+const CODEX_OFFICIAL_MODELS: &[&str] = &["gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"];
+const CODEX_DEFAULT_MODEL: &str = "gpt-5.2-codex";
+
+pub fn resolve_codex_model(request_model: &str) -> &'static str {
+    if let Some(m) = CODEX_OFFICIAL_MODELS.iter().find(|&&m| m == request_model) {
+        return *m;
+    }
+    let lower = request_model.to_lowercase();
+    if lower.contains("codex-max") || lower.contains("max") {
+        return "gpt-5.1-codex-max";
+    }
+    if lower.contains("codex-mini") || lower.contains("mini") {
+        return "gpt-5.1-codex-mini";
+    }
+    CODEX_DEFAULT_MODEL
+}
+
 /// 获取所有内置支持的模型列表关键字
 pub fn get_supported_models() -> Vec<String> {
     CLAUDE_TO_GEMINI.keys().map(|s| s.to_string()).collect()

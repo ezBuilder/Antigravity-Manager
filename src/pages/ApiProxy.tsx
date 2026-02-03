@@ -2049,7 +2049,7 @@ print(response.text)`;
 
                             <div className="p-3 space-y-3">
                                 {/* PM Router */}
-                                <div className="bg-gradient-to-br from-blue-50/60 via-white to-purple-50/40 dark:from-blue-900/10 dark:via-base-100 dark:to-purple-900/10 border border-blue-100 dark:border-blue-900/40 rounded-xl p-4">
+                                <div className="bg-gradient-to-br from-blue-50/60 via-white to-purple-50/40 dark:from-gray-900/80 dark:via-gray-900 dark:to-gray-900/90 border border-blue-100 dark:border-gray-700/50 rounded-xl p-4">
                                     <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                                         <div className="space-y-1">
                                             <h3 className="text-sm font-bold text-gray-900 dark:text-base-content flex items-center gap-2">
@@ -2058,6 +2058,9 @@ print(response.text)`;
                                             </h3>
                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 max-w-2xl">
                                                 {t('proxy.pm_router.subtitle', { defaultValue: 'Ignore client model hints and let the PM agent select the best model before routing.' })}
+                                            </p>
+                                            <p className="text-[10px] text-amber-600 dark:text-amber-400/90 max-w-2xl mt-1">
+                                                {t('proxy.pm_router.url_hint', { defaultValue: 'PM Router only applies when the client (e.g. Claude Code) API Base URL points to this proxy (see port below).' })}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -2084,7 +2087,7 @@ print(response.text)`;
                                                             'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
                                                             pmRouterConfig.scope === 'cli_only'
                                                                 ? 'bg-blue-500 text-white border-blue-500'
-                                                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-300'
+                                                                : 'border-gray-200 dark:border-gray-600/80 text-gray-600 dark:text-gray-400 hover:border-blue-300 dark:hover:border-gray-500'
                                                         )}
                                                         onClick={() => updatePmRouterConfig({ scope: 'cli_only' })}
                                                     >
@@ -2096,7 +2099,7 @@ print(response.text)`;
                                                             'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
                                                             pmRouterConfig.scope === 'all_requests'
                                                                 ? 'bg-blue-500 text-white border-blue-500'
-                                                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-300'
+                                                                : 'border-gray-200 dark:border-gray-600/80 text-gray-600 dark:text-gray-400 hover:border-blue-300 dark:hover:border-gray-500'
                                                         )}
                                                         onClick={() => updatePmRouterConfig({ scope: 'all_requests' })}
                                                     >
@@ -2145,7 +2148,7 @@ print(response.text)`;
                                                     max={20000}
                                                     value={pmRouterConfig.max_context_chars}
                                                     onChange={(e) => updatePmRouterConfig({ max_context_chars: Number(e.target.value) })}
-                                                    className="input input-xs input-bordered w-full text-[11px] bg-white dark:bg-gray-800"
+                                                    className="input input-xs input-bordered w-full text-[11px] bg-white dark:bg-gray-800/80 dark:border-gray-600"
                                                 />
                                                 <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.context_hint', { defaultValue: 'Used to cap the prompt sent to the router agent.' })}</p>
                                             </div>
@@ -2156,7 +2159,7 @@ print(response.text)`;
                                                     onChange={(e) => updatePmRouterConfig({
                                                         cli_user_agents: e.target.value.split(',').map(v => v.trim()).filter(Boolean)
                                                     })}
-                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800"
+                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800/80 dark:border-gray-600"
                                                 />
                                                 <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.user_agents_hint', { defaultValue: 'Comma-separated keywords used to detect CLI traffic.' })}</p>
                                             </div>
@@ -2167,49 +2170,49 @@ print(response.text)`;
                                                     onChange={(e) => updatePmRouterConfig({
                                                         pro_keywords: e.target.value.split(',').map(v => v.trim()).filter(Boolean)
                                                     })}
-                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800"
+                                                    className="textarea textarea-bordered text-[11px] min-h-[56px] bg-white dark:bg-gray-800/80 dark:border-gray-600"
                                                 />
                                                 <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('proxy.pm_router.pro_keywords_hint', { defaultValue: 'Comma-separated keywords that trigger PM-pro routing.' })}</p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="mt-4 bg-white/70 dark:bg-base-200/40 border border-gray-100 dark:border-base-200 rounded-xl p-3">
+                                    <div className="mt-4 bg-white/70 dark:bg-gray-800/50 dark:border-gray-700/50 rounded-xl p-3 border border-gray-100">
                                         <div className="flex items-center gap-2 mb-2">
                                             <Sparkles size={14} className="text-purple-500" />
-                                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-400">
                                                 {t('proxy.pm_router.assignment_title', { defaultValue: 'Default Model Assignments' })}
                                             </span>
                                         </div>
                                         <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-2">
                                             {t('proxy.pm_router.assignment_desc', { defaultValue: 'Based on the PRD: coder/debug/review/architecture/docs/research/image agents.' })}
                                         </p>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-gray-600 dark:text-gray-300">
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-gray-600 dark:text-gray-400">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Coder</span>
                                                 <span className="font-mono">gpt-5.2-codex → claude-sonnet-4-5 → gemini-2.5-pro</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Debug</span>
                                                 <span className="font-mono">claude-sonnet-4-5-thinking → gpt-5.1-codex-max → gemini-2.5-pro</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Review</span>
                                                 <span className="font-mono">claude-sonnet-4-5 → gpt-5.2-codex → gemini-2.5-pro</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Architecture</span>
                                                 <span className="font-mono">claude-opus-4-5-thinking → gpt-5.1-codex-max → claude-sonnet-4-5-thinking</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Docs</span>
                                                 <span className="font-mono">claude-sonnet-4-5 → gpt-5.1-codex-mini → gemini-2.5-flash</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50">
                                                 <span className="font-semibold">Research</span>
                                                 <span className="font-mono">gemini-2.5-pro → claude-sonnet-4-5 → gpt-5.1-codex-mini</span>
                                             </div>
-                                            <div className="flex items-center justify-between bg-white dark:bg-base-100 px-3 py-2 rounded-lg border border-gray-100 dark:border-base-200 md:col-span-2">
+                                            <div className="flex items-center justify-between bg-white dark:bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-100 dark:border-gray-700/50 md:col-span-2">
                                                 <span className="font-semibold">Image/UI</span>
                                                 <span className="font-mono">gemini-3-pro-image → gemini-2.5-pro → gpt-5.2-codex</span>
                                             </div>

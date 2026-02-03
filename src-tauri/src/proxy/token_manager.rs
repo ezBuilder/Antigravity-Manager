@@ -103,13 +103,9 @@ impl TokenManager {
         tracing::info!("Rate limit auto-cleanup task started (interval: 15s)");
     }
 
-    /// 从主应用账号目录加载所有账号
+    /// 从主应用账号目录加载所有账号（含 Antigravity accounts/*.json 与 Codex 独立存储）
     pub async fn load_accounts(&self) -> Result<usize, String> {
         let accounts_dir = self.data_dir.join("accounts");
-
-        if !accounts_dir.exists() {
-            return Err(format!("账号目录不存在: {:?}", accounts_dir));
-        }
 
         // Reload should reflect current on-disk state (accounts can be added/removed/disabled).
         self.tokens.clear();
@@ -119,36 +115,91 @@ impl TokenManager {
             *last_used = None;
         }
 
-        let entries = std::fs::read_dir(&accounts_dir)
-            .map_err(|e| format!("读取账号目录失败: {}", e))?;
-
         let mut count = 0;
 
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
-            let path = entry.path();
+        if accounts_dir.exists() {
+            let entries = std::fs::read_dir(&accounts_dir)
+                .map_err(|e| format!("读取账号目录失败: {}", e))?;
 
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
+            for entry in entries {
+                let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+                let path = entry.path();
+
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+
+                match self.load_single_account(&path).await {
+                    Ok(Some(token)) => {
+                        let account_id = token.account_id.clone();
+                        self.tokens.insert(account_id, token);
+                        count += 1;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::debug!("加载账号失败 {:?}: {}", path, e);
+                    }
+                }
             }
+        }
 
-            // 尝试加载账号
-            match self.load_single_account(&path).await {
-                Ok(Some(token)) => {
+        // [PM-Router] Codex 独立存储(.antigravity_tools/codex/accounts.json)도 로드해 provider=codex 풀에 포함
+        if let Ok(store) = crate::modules::codex::storage::load_codex_accounts() {
+            let codex_path = crate::modules::codex::storage::get_codex_data_dir()
+                .unwrap_or_else(|_| self.data_dir.join("codex"));
+            for account in store.accounts {
+                if let Some(token) = self.codex_account_to_proxy_token(&account, &codex_path) {
                     let account_id = token.account_id.clone();
                     self.tokens.insert(account_id, token);
                     count += 1;
-                }
-                Ok(None) => {
-                    // 跳过无效账号
-                }
-                Err(e) => {
-                    tracing::debug!("加载账号失败 {:?}: {}", path, e);
                 }
             }
         }
 
         Ok(count)
+    }
+
+    /// Codex 独立存储의 계정을 ProxyToken 으로 변환 (PM Router / OpenAI 代理용)
+    fn codex_account_to_proxy_token(
+        &self,
+        account: &crate::modules::codex::types::CodexAccount,
+        codex_dir: &PathBuf,
+    ) -> Option<ProxyToken> {
+        use crate::modules::codex::types::CodexAuthData;
+        let (access_token, refresh_token, expires_in) = match &account.auth_data {
+            CodexAuthData::ApiKey { key } => (key.clone(), String::new(), 60 * 60 * 24 * 365),
+            CodexAuthData::ChatGPT {
+                access_token,
+                refresh_token,
+                ..
+            } => (access_token.clone(), refresh_token.clone(), 3600),
+        };
+        let now = chrono::Utc::now().timestamp();
+        let email = account
+            .email
+            .clone()
+            .unwrap_or_else(|| account.name.clone());
+        let subscription_tier = account.plan_type.clone();
+        let account_path = codex_dir.join("accounts.json");
+
+        Some(ProxyToken {
+            account_id: account.id.clone(),
+            access_token,
+            refresh_token,
+            expires_in,
+            timestamp: now,
+            email,
+            provider: "codex".to_string(),
+            account_path: account_path.clone(),
+            project_id: None,
+            subscription_tier,
+            remaining_quota: None,
+            protected_models: HashSet::new(),
+            health_score: self.health_scores.get(&account.id).map(|r| *r).unwrap_or(1.0),
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
+        })
     }
 
     /// 重新加载指定账号（用于配额更新后的实时同步）

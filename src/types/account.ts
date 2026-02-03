@@ -1,3 +1,19 @@
+/** Codex 사용량 (5시간 롤링 / 주간 한도) */
+export interface CodexUsageInfo {
+    account_id: string;
+    plan_type?: string;
+    primary_used_percent?: number;
+    primary_window_minutes?: number;
+    primary_resets_at?: number;
+    secondary_used_percent?: number;
+    secondary_window_minutes?: number;
+    secondary_resets_at?: number;
+    has_credits?: boolean;
+    unlimited_credits?: boolean;
+    credits_balance?: string;
+    error?: string;
+}
+
 export interface Account {
     id: string;
     email: string;
@@ -7,6 +23,8 @@ export interface Account {
     device_profile?: DeviceProfile;
     device_history?: DeviceProfileVersion[];
     quota?: QuotaData;
+    /** Codex 계정 전용: 5시간/주간 사용량 (OAuth 계정만) */
+    codex_usage?: CodexUsageInfo;
     disabled?: boolean;
     disabled_reason?: string;
     disabled_at?: number;

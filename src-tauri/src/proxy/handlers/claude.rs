@@ -16,10 +16,12 @@ use crate::proxy::mappers::claude::{
     transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
     filter_invalid_thinking_blocks_with_family, close_tool_loop_for_thinking,
     clean_cache_control_from_messages, merge_consecutive_messages,
-    models::{Message, MessageContent},
+    models::{ContentBlock, Message, MessageContent},
+    utils::get_context_limit_for_model,
 };
 use crate::proxy::server::AppState;
 use crate::proxy::pm_router;
+use crate::proxy::handlers::codex;
 use crate::proxy::mappers::context_manager::ContextManager;
 use crate::proxy::mappers::estimation_calibrator::get_calibrator;
 use crate::proxy::debug_logger;
@@ -161,6 +163,106 @@ pub async fn handle_messages(
             "request": original_body,  // 使用原始请求体，不是结构体序列化
         });
         debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "original_request", &original_payload).await;
+    }
+
+    // [Codex] Anthropic 프로토콜에서 gpt-5.x-codex 요청이 오면 Codex API로 라우팅
+    if crate::proxy::handlers::codex::should_use_codex(&request.model) {
+        info!("[Auto-Route] 🔀 {} → Codex (Anthropic /v1/messages)", request.model);
+        let openai_messages: Vec<Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                let content = match &m.content {
+                    MessageContent::String(s) => s.clone(),
+                    MessageContent::Array(blocks) => {
+                        let texts: Vec<String> = blocks
+                            .iter()
+                            .filter_map(|b| {
+                                if let ContentBlock::Text { text } = b {
+                                    Some(text.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        texts.join("\n")
+                    }
+                };
+                json!({ "role": m.role, "content": content })
+            })
+            .collect();
+        let openai_body = json!({
+            "model": request.model,
+            "messages": openai_messages,
+            "stream": false
+        });
+        match codex::call_codex_chat_api(openai_body).await {
+            Ok((status, openai_resp, model_used)) => {
+                if !status.is_success() {
+                    let err_obj = openai_resp.get("error").and_then(|e| e.as_object());
+                    let err_msg = err_obj
+                        .and_then(|o| o.get("message"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or_else(|| openai_resp.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown Codex API error"));
+                    let err_code = err_obj.and_then(|o| o.get("code")).and_then(|c| c.as_str());
+                    let full_msg = match err_code {
+                        Some(c) => format!("{} (code: {})", err_msg, c),
+                        None => err_msg.to_string(),
+                    };
+                    return (
+                        status,
+                        Json(json!({
+                            "type": "error",
+                            "error": { "type": "api_error", "message": full_msg }
+                        })),
+                    )
+                        .into_response();
+                }
+                let content_str = openai_resp
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+                let input_tokens = openai_resp
+                    .get("usage")
+                    .and_then(|u| u.get("prompt_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let output_tokens = openai_resp
+                    .get("usage")
+                    .and_then(|u| u.get("completion_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let anthropic_body = json!({
+                    "id": openai_resp.get("id").unwrap_or(&json!("")),
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model_used,
+                    "content": [{ "type": "text", "text": content_str }],
+                    "stop_reason": "end_turn",
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0
+                    }
+                });
+                return (status, Json(anthropic_body)).into_response();
+            }
+            Err((status, msg)) => {
+                return (
+                    status,
+                    Json(json!({
+                        "type": "error",
+                        "error": { "type": "api_error", "message": msg }
+                    })),
+                )
+                    .into_response();
+            }
+        }
     }
 
     // [Issue #703 Fix] 智能兜底判断:需要归一化模型名用于配额保护检查
@@ -374,9 +476,11 @@ pub async fn handle_messages(
     let mut request_for_body = request.clone();
     let original_model = request_for_body.model.clone();
     let pm_router_config = state.pm_router.read().await.clone();
-    let should_route = pm_router::should_apply_router(&pm_router_config, &headers)
-        && detect_background_task_type(&request_for_body).is_none();
+    let bg_task = detect_background_task_type(&request_for_body);
+    let scope_ok = pm_router::should_apply_router(&pm_router_config, &headers);
+    let should_route = scope_ok && bg_task.is_none();
 
+    let mut pm_selected_model: Option<String> = None;
     if should_route {
         match pm_router::select_model_for_claude_request(
             &state,
@@ -397,6 +501,7 @@ pub async fn handle_messages(
                     decision.task_type,
                     decision.reason
                 );
+                pm_selected_model = Some(decision.selected_model.clone());
                 request_for_body.model = decision.selected_model;
             }
             Err(err) => {
@@ -405,6 +510,20 @@ pub async fn handle_messages(
                     trace_id, err, original_model
                 );
             }
+        }
+    } else if pm_router_config.enabled {
+        // PM Router is ON but this request was skipped — log reason for debugging
+        if let Some(bt) = bg_task {
+            debug!(
+                "[{}][PM-Router] Skipped: background task detected (type={:?}), using request model {}",
+                trace_id, bt, original_model
+            );
+        } else if !scope_ok {
+            let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("-");
+            debug!(
+                "[{}][PM-Router] Skipped: scope=CLI-only and User-Agent not matched (UA={})",
+                trace_id, ua
+            );
         }
     }
     let token_manager = state.token_manager;
@@ -455,9 +574,15 @@ pub async fn handle_messages(
                 } else {
                     e
                 };
-                let headers = [
-                    ("X-Mapped-Model", mapped_model.as_str()),
-                ];
+                let mut headers = HeaderMap::new();
+                if let Ok(v) = header::HeaderValue::from_str(&mapped_model) {
+                    headers.insert("X-Mapped-Model", v);
+                }
+                if let Some(ref pm) = pm_selected_model {
+                    if let Ok(v) = header::HeaderValue::from_str(pm) {
+                        headers.insert("X-PM-Selected-Model", v);
+                    }
+                }
                  return (
                     StatusCode::SERVICE_UNAVAILABLE,
                     headers,
@@ -690,10 +815,18 @@ pub async fn handle_messages(
                 b
             },
             Err(e) => {
-                 let headers = [
-                    ("X-Mapped-Model", request_with_mapped.model.as_str()),
-                    ("X-Account-Email", email.as_str()),
-                ];
+                 let mut headers = HeaderMap::new();
+                 if let Ok(v) = header::HeaderValue::from_str(&request_with_mapped.model) {
+                     headers.insert("X-Mapped-Model", v);
+                 }
+                 if let Ok(v) = header::HeaderValue::from_str(&email) {
+                     headers.insert("X-Account-Email", v);
+                 }
+                 if let Some(ref pm) = pm_selected_model {
+                     if let Ok(v) = header::HeaderValue::from_str(pm) {
+                         headers.insert("X-PM-Selected-Model", v);
+                     }
+                 }
                  return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     headers,
@@ -861,7 +994,7 @@ pub async fn handle_messages(
                         // 判断客户端期望的格式
                         if client_wants_stream {
                             // 客户端本就要 Stream，直接返回 SSE
-                            return Response::builder()
+                            let mut builder = Response::builder()
                                 .status(StatusCode::OK)
                                 .header(header::CONTENT_TYPE, "text/event-stream")
                                 .header(header::CACHE_CONTROL, "no-cache")
@@ -869,9 +1002,11 @@ pub async fn handle_messages(
                                 .header("X-Accel-Buffering", "no")
                                 .header("X-Account-Email", &email)
                                 .header("X-Mapped-Model", &request_with_mapped.model)
-                                .header("X-Context-Purified", if is_purified { "true" } else { "false" })
-                                .body(Body::from_stream(combined_stream))
-                                .unwrap();
+                                .header("X-Context-Purified", if is_purified { "true" } else { "false" });
+                            if let Some(ref pm) = pm_selected_model {
+                                builder = builder.header("X-PM-Selected-Model", pm.as_str());
+                            }
+                            return builder.body(Body::from_stream(combined_stream)).unwrap();
                         } else {
                             // 客户端要非 Stream，需要收集完整响应并转换为 JSON
                             use crate::proxy::mappers::claude::collect_stream_to_json;
@@ -879,14 +1014,16 @@ pub async fn handle_messages(
                             match collect_stream_to_json(combined_stream).await {
                                 Ok(full_response) => {
                                     info!("[{}] ✓ Stream collected and converted to JSON", trace_id);
-                                    return Response::builder()
+                                    let mut builder = Response::builder()
                                         .status(StatusCode::OK)
                                         .header(header::CONTENT_TYPE, "application/json")
                                         .header("X-Account-Email", &email)
                                         .header("X-Mapped-Model", &request_with_mapped.model)
-                                        .header("X-Context-Purified", if is_purified { "true" } else { "false" })
-                                        .body(Body::from(serde_json::to_string(&full_response).unwrap()))
-                                        .unwrap();
+                                        .header("X-Context-Purified", if is_purified { "true" } else { "false" });
+                                    if let Some(ref pm) = pm_selected_model {
+                                        builder = builder.header("X-PM-Selected-Model", pm.as_str());
+                                    }
+                                    return builder.body(Body::from(serde_json::to_string(&full_response).unwrap())).unwrap();
                                 }
                                 Err(e) => {
                                     return (StatusCode::INTERNAL_SERVER_ERROR, format!("Stream collection error: {}", e)).into_response();
@@ -962,7 +1099,19 @@ pub async fn handle_messages(
                     cache_info
                 );
 
-                return (StatusCode::OK, [("X-Account-Email", email.as_str()), ("X-Mapped-Model", request_with_mapped.model.as_str())], Json(claude_response)).into_response();
+                let mut h = HeaderMap::new();
+                if let Ok(v) = header::HeaderValue::from_str(&email) {
+                    h.insert("X-Account-Email", v);
+                }
+                if let Ok(v) = header::HeaderValue::from_str(&request_with_mapped.model) {
+                    h.insert("X-Mapped-Model", v);
+                }
+                if let Some(ref pm) = pm_selected_model {
+                    if let Ok(v) = header::HeaderValue::from_str(pm) {
+                        h.insert("X-PM-Selected-Model", v);
+                    }
+                }
+                return (StatusCode::OK, h, Json(claude_response)).into_response();
             }
         }
         
@@ -1151,6 +1300,11 @@ pub async fn handle_messages(
                 headers.insert("X-Mapped-Model", v);
              }
         }
+        if let Some(ref pm) = pm_selected_model {
+            if let Ok(v) = header::HeaderValue::from_str(pm) {
+                headers.insert("X-PM-Selected-Model", v);
+            }
+        }
 
         let error_type = match last_status.as_u16() {
             400 => "invalid_request_error",
@@ -1177,7 +1331,12 @@ pub async fn handle_messages(
                 headers.insert("X-Mapped-Model", v);
              }
         }
-        
+        if let Some(ref pm) = pm_selected_model {
+            if let Ok(v) = header::HeaderValue::from_str(pm) {
+                headers.insert("X-PM-Selected-Model", v);
+            }
+        }
+
         let error_type = match last_status.as_u16() {
             400 => "invalid_request_error",
             401 => "authentication_error",

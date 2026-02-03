@@ -32,7 +32,7 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
     const [status, setStatus] = useState<Status>('idle');
     const [message, setMessage] = useState('');
 
-    const { startOAuthLogin, completeOAuthLogin, cancelOAuthLogin, importFromDb, importV1Accounts, importFromCustomDb, addCodexAccount } = useAccountStore();
+    const { startOAuthLogin, completeOAuthLogin, cancelOAuthLogin, importFromDb, importV1Accounts, importFromCustomDb, addCodexAccount, startCodexOAuthAndWait } = useAccountStore();
 
     const oauthUrlRef = useRef(oauthUrl);
     const statusRef = useRef(status);
@@ -278,13 +278,22 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
         }
     };
 
+    /** Codex OAuth 브라우저 로그인 (기본 방식) */
+    const handleCodexOAuth = async () => {
+        const name = codexLabel.trim() || `Codex-${Date.now()}`;
+        await handleAction(
+            t('accounts.add.codex.oauth_btn'),
+            () => startCodexOAuthAndWait(name)
+        );
+    };
+
+    /** Codex API 키로 추가 (보조) */
     const handleCodexSubmit = async () => {
         if (!codexApiKey.trim()) {
             setStatus('error');
             setMessage(t('accounts.add.codex.error_api_key'));
             return;
         }
-
         await handleAction(
             t('accounts.add.codex.title'),
             () => addCodexAccount(codexLabel.trim() ? codexLabel.trim() : null, codexApiKey.trim())
@@ -665,35 +674,51 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
 
                             {activeTab === 'codex' && (
                                 <div className="space-y-4 py-2">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                            {t('accounts.add.codex.label')}
+                                        </label>
+                                        <input
+                                            className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
+                                            placeholder={t('accounts.add.codex.label_placeholder')}
+                                            value={codexLabel}
+                                            onChange={(e) => setCodexLabel(e.target.value)}
+                                            disabled={status === 'loading' || status === 'success'}
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="w-full px-4 py-3 bg-purple-500 hover:bg-purple-600 text-white font-medium rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={handleCodexOAuth}
+                                        disabled={status === 'loading' || status === 'success'}
+                                    >
+                                        {status === 'loading' && activeTab === 'codex' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                        {t('accounts.add.codex.oauth_btn')}
+                                    </button>
+                                    <p className="text-[10px] text-gray-400 text-center">
+                                        {t('accounts.add.codex.oauth_hint')}
+                                    </p>
+                                    <div className="divider text-xs text-gray-400">{t('accounts.add.codex.or_api_key')}</div>
                                     <div className="bg-gray-50 dark:bg-base-200 p-4 rounded-lg border border-gray-200 dark:border-base-300 space-y-3">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                                                {t('accounts.add.codex.label')}
-                                            </label>
-                                            <input
-                                                className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
-                                                placeholder={t('accounts.add.codex.label_placeholder')}
-                                                value={codexLabel}
-                                                onChange={(e) => setCodexLabel(e.target.value)}
-                                                disabled={status === 'loading' || status === 'success'}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                                                {t('accounts.add.codex.api_key')}
-                                            </label>
-                                            <input
-                                                type="password"
-                                                className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
-                                                placeholder={t('accounts.add.codex.api_key_placeholder')}
-                                                value={codexApiKey}
-                                                onChange={(e) => setCodexApiKey(e.target.value)}
-                                                disabled={status === 'loading' || status === 'success'}
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-gray-400">
-                                            {t('accounts.add.codex.hint')}
-                                        </p>
+                                        <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">
+                                            {t('accounts.add.codex.api_key')}
+                                        </label>
+                                        <input
+                                            type="password"
+                                            className="input input-bordered w-full text-sm bg-white dark:bg-base-100 text-gray-900 dark:text-base-content border-gray-300 dark:border-base-300"
+                                            placeholder={t('accounts.add.codex.api_key_placeholder')}
+                                            value={codexApiKey}
+                                            onChange={(e) => setCodexApiKey(e.target.value)}
+                                            disabled={status === 'loading' || status === 'success'}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-ghost btn-sm text-gray-600 dark:text-gray-400"
+                                            onClick={handleCodexSubmit}
+                                            disabled={status === 'loading' || status === 'success' || !codexApiKey.trim()}
+                                        >
+                                            {t('accounts.add.codex.btn_confirm')}
+                                        </button>
                                     </div>
                                 </div>
                             )}
@@ -774,14 +799,7 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                                 </button>
                             )}
                             {activeTab === 'codex' && (
-                                <button
-                                    className="flex-1 px-4 py-2.5 text-white font-medium rounded-xl shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 bg-purple-500 hover:bg-purple-600 focus:ring-purple-500 shadow-purple-100 dark:shadow-purple-900/30 flex justify-center items-center gap-2"
-                                    onClick={handleCodexSubmit}
-                                    disabled={status === 'loading' || status === 'success'}
-                                >
-                                    {status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                                    {t('accounts.add.codex.btn_confirm')}
-                                </button>
+                                <span className="flex-1" />
                             )}
                         </div>
                     </div>

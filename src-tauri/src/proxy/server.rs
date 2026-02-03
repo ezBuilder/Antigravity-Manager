@@ -198,7 +198,14 @@ impl AxumServer {
     pub async fn update_pm_router(&self, config: &crate::proxy::config::ProxyConfig) {
         let mut pm = self.pm_router.write().await;
         *pm = config.pm_router.clone();
-        tracing::info!("PM Router 配置已热更新");
+        let scope = match pm.scope {
+            crate::proxy::config::PmRouterScope::AllRequests => "all_requests",
+            crate::proxy::config::PmRouterScope::CliOnly => "cli_only",
+        };
+        tracing::info!(
+            "PM Router 配置已热更新: enabled={}, scope={}",
+            pm.enabled, scope
+        );
     }
 
     /// 更新代理配置
@@ -264,7 +271,15 @@ impl AxumServer {
         pm_router_config: crate::proxy::PmRouterConfig,
     ) -> Result<(Self, tokio::task::JoinHandle<()>), String> {
         let custom_mapping_state = Arc::new(tokio::sync::RwLock::new(custom_mapping));
-        let pm_router_state = Arc::new(RwLock::new(pm_router_config));
+        let pm_router_state = Arc::new(RwLock::new(pm_router_config.clone()));
+        let scope_str = match pm_router_config.scope {
+            crate::proxy::config::PmRouterScope::AllRequests => "all_requests",
+            crate::proxy::config::PmRouterScope::CliOnly => "cli_only",
+        };
+        tracing::info!(
+            "PM Router 初始配置: enabled={}, scope={}",
+            pm_router_config.enabled, scope_str
+        );
         let proxy_state = Arc::new(tokio::sync::RwLock::new(upstream_proxy.clone()));
         let security_state = Arc::new(RwLock::new(security_config));
         let zai_state = Arc::new(RwLock::new(zai_config));
