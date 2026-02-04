@@ -11,13 +11,13 @@ use axum::{
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde_json::{json, Value};
 use tracing::{debug, info};
-use futures::StreamExt;
 
-use crate::modules::codex::{storage, types::CodexAuthData};
+use crate::modules::codex::{refresh_codex_account_tokens, storage, types::CodexAuthData, CodexAccount};
 use crate::proxy::server::AppState;
 
 /// OpenAI API 베이스 URL
 const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+const CODEX_USER_AGENT: &str = "codex-cli/1.0.0";
 
 /// Codex 공식 모델: 요청 모델이 이 중 하나면 그대로 전달, 아니면 기본값 사용
 const CODEX_MODELS: &[&str] = &["gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"];
@@ -53,7 +53,9 @@ pub async fn call_codex_chat_api(
     body: Value,
 ) -> Result<(StatusCode, Value, String), (StatusCode, String)> {
     let _trace_id = format!("codex_{}", chrono::Utc::now().timestamp_subsec_millis());
-    let (access_token, _account_id, chatgpt_account_id) = get_active_codex_token().await?;
+    let mut account = get_active_codex_account()?;
+    let (mut access_token, refresh_token, mut chatgpt_account_id) =
+        extract_codex_auth(&account)?;
 
     let original_model = body
         .get("model")
@@ -65,21 +67,33 @@ pub async fn call_codex_chat_api(
     body["model"] = json!(model_to_send);
     body["stream"] = json!(false);
 
-    const CODEX_USER_AGENT: &str = "codex-cli/1.0.0";
     let client = reqwest::Client::new();
-    let mut req_builder = client
-        .post(format!("{}/chat/completions", OPENAI_API_BASE))
-        .header(AUTHORIZATION, format!("Bearer {}", access_token))
-        .header(CONTENT_TYPE, "application/json")
-        .header(USER_AGENT, CODEX_USER_AGENT)
-        .json(&body);
-    if let Some(cg_id) = &chatgpt_account_id {
-        req_builder = req_builder.header("chatgpt-account-id", cg_id.as_str());
+    let mut response = send_codex_request(
+        &client,
+        "/chat/completions",
+        &body,
+        &access_token,
+        chatgpt_account_id.as_deref(),
+    )
+    .await?;
+
+    if should_refresh_codex_token(response.status(), refresh_token.as_deref()) {
+        if let Ok((updated, refresh_result)) =
+            refresh_codex_account_tokens(&account.id).await
+        {
+            account = updated;
+            access_token = refresh_result.access_token;
+            chatgpt_account_id = extract_codex_auth(&account)?.2;
+            response = send_codex_request(
+                &client,
+                "/chat/completions",
+                &body,
+                &access_token,
+                chatgpt_account_id.as_deref(),
+            )
+            .await?;
+        }
     }
-    let response = req_builder
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("OpenAI API 요청 실패: {}", e)))?;
 
     let status = response.status();
     if !status.is_success() {
@@ -115,7 +129,9 @@ pub async fn handle_codex_chat(
     let trace_id = format!("codex_{}", chrono::Utc::now().timestamp_subsec_millis());
     info!("[{}] Codex API Request", trace_id);
 
-    let (access_token, account_id, chatgpt_account_id) = get_active_codex_token().await?;
+    let mut account = get_active_codex_account()?;
+    let (mut access_token, refresh_token, mut chatgpt_account_id) =
+        extract_codex_auth(&account)?;
 
     let original_model = body
         .get("model")
@@ -127,27 +143,39 @@ pub async fn handle_codex_chat(
 
     debug!(
         "[{}] Model: {} → {}, account: {}",
-        trace_id, original_model, model_to_send, account_id
+        trace_id, original_model, model_to_send, account.id
     );
 
     let stream = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if stream {
-        const CODEX_USER_AGENT: &str = "codex-cli/1.0.0";
         let client = reqwest::Client::new();
-        let mut req_builder = client
-            .post(format!("{}/chat/completions", OPENAI_API_BASE))
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
-            .header(CONTENT_TYPE, "application/json")
-            .header(USER_AGENT, CODEX_USER_AGENT)
-            .json(&body);
-        if let Some(cg_id) = &chatgpt_account_id {
-            req_builder = req_builder.header("chatgpt-account-id", cg_id.as_str());
+        let mut response = send_codex_request(
+            &client,
+            "/chat/completions",
+            &body,
+            &access_token,
+            chatgpt_account_id.as_deref(),
+        )
+        .await?;
+
+        if should_refresh_codex_token(response.status(), refresh_token.as_deref()) {
+            if let Ok((updated, refresh_result)) =
+                refresh_codex_account_tokens(&account.id).await
+            {
+                account = updated;
+                access_token = refresh_result.access_token;
+                chatgpt_account_id = extract_codex_auth(&account)?.2;
+                response = send_codex_request(
+                    &client,
+                    "/chat/completions",
+                    &body,
+                    &access_token,
+                    chatgpt_account_id.as_deref(),
+                )
+                .await?;
+            }
         }
-        let response = req_builder
-            .send()
-            .await
-            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("OpenAI API 요청 실패: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -174,7 +202,7 @@ pub async fn handle_codex_chat(
             .header("Content-Type", "text/event-stream")
             .header("Cache-Control", "no-cache")
             .header("Connection", "keep-alive")
-            .header("X-Codex-Account", &account_id)
+            .header("X-Codex-Account", &account.id)
             .header("X-Model", model_to_send)
             .body(body)
             .unwrap();
@@ -185,10 +213,7 @@ pub async fn handle_codex_chat(
     match call_codex_chat_api(body).await {
         Ok((status, response_body, model_used)) => Ok((
             status,
-            [
-                ("X-Codex-Account", account_id.as_str()),
-                ("X-Model", model_used.as_str()),
-            ],
+            [("X-Codex-Account", account.id.as_str()), ("X-Model", model_used.as_str())],
             Json(response_body),
         )
             .into_response()),
@@ -196,9 +221,7 @@ pub async fn handle_codex_chat(
     }
 }
 
-/// 활성 Codex 계정의 토큰 가져오기
-/// Returns (access_token, antigravity_account_id, chatgpt_account_id_for_header)
-async fn get_active_codex_token() -> Result<(String, String, Option<String>), (StatusCode, String)> {
+fn get_active_codex_account() -> Result<CodexAccount, (StatusCode, String)> {
     let active = storage::get_codex_active_account().map_err(|e| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -206,49 +229,66 @@ async fn get_active_codex_token() -> Result<(String, String, Option<String>), (S
         )
     })?;
 
-    match active {
-        Some(account) => match &account.auth_data {
-            CodexAuthData::ChatGPT {
-                access_token,
-                account_id: cg_id,
-                ..
-            } => Ok((
-                access_token.clone(),
-                account.id.clone(),
-                cg_id.clone(),
-            )),
-            CodexAuthData::ApiKey { key } => {
-                Ok((key.clone(), account.id.clone(), None))
-            }
-        },
-        None => {
-            let store = storage::load_codex_accounts().map_err(|e| {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("계정 로드 실패: {}", e),
-                )
-            })?;
-
-            if store.accounts.is_empty() {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "등록된 Codex 계정이 없습니다".to_string(),
-                ));
-            }
-
-            let first = &store.accounts[0];
-            match &first.auth_data {
-                CodexAuthData::ChatGPT {
-                    access_token,
-                    account_id: cg_id,
-                    ..
-                } => Ok((
-                    access_token.clone(),
-                    first.id.clone(),
-                    cg_id.clone(),
-                )),
-                CodexAuthData::ApiKey { key } => Ok((key.clone(), first.id.clone(), None)),
-            }
-        }
+    if let Some(account) = active {
+        return Ok(account);
     }
+
+    let store = storage::load_codex_accounts().map_err(|e| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("계정 로드 실패: {}", e),
+        )
+    })?;
+
+    if store.accounts.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "등록된 Codex 계정이 없습니다".to_string(),
+        ));
+    }
+
+    Ok(store.accounts[0].clone())
+}
+
+fn extract_codex_auth(
+    account: &CodexAccount,
+) -> Result<(String, Option<String>, Option<String>), (StatusCode, String)> {
+    match &account.auth_data {
+        CodexAuthData::ChatGPT {
+            access_token,
+            refresh_token,
+            account_id: cg_id,
+            ..
+        } => Ok((access_token.clone(), Some(refresh_token.clone()), cg_id.clone())),
+        CodexAuthData::ApiKey { key } => Ok((key.clone(), None, None)),
+    }
+}
+
+fn should_refresh_codex_token(status: StatusCode, refresh_token: Option<&str>) -> bool {
+    matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+        && refresh_token
+            .map(|t| !t.is_empty())
+            .unwrap_or(false)
+}
+
+async fn send_codex_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    body: &Value,
+    access_token: &str,
+    chatgpt_account_id: Option<&str>,
+) -> Result<reqwest::Response, (StatusCode, String)> {
+    let mut req_builder = client
+        .post(format!("{OPENAI_API_BASE}{endpoint}"))
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(CONTENT_TYPE, "application/json")
+        .header(USER_AGENT, CODEX_USER_AGENT)
+        .json(body);
+    if let Some(cg_id) = chatgpt_account_id {
+        req_builder = req_builder.header("chatgpt-account-id", cg_id);
+    }
+    req_builder
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("OpenAI API 요청 실패: {}", e)))
 }

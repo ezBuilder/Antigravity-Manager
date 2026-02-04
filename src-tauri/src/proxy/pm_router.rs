@@ -316,7 +316,7 @@ async fn call_openai_router_model(
     prompt: &str,
 ) -> Result<String, String> {
     let token_manager = state.token_manager.clone();
-    let (api_key, _project_id, _email, _wait_ms) = token_manager
+    let (mut api_key, _project_id, _email, _wait_ms) = token_manager
         .get_token("codex", false, None, model)
         .await?;
 
@@ -331,13 +331,40 @@ async fn call_openai_router_model(
     });
 
     let client = crate::utils::http::get_long_client();
-    let resp = client
+    let mut chatgpt_account_id = token_manager.find_codex_chatgpt_account_id(&api_key);
+
+    let mut req = client
         .post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(api_key)
-        .json(&body)
+        .header(axum::http::header::USER_AGENT, "codex-cli/1.0.0")
+        .bearer_auth(&api_key)
+        .json(&body);
+    if let Some(cg_id) = &chatgpt_account_id {
+        req = req.header("chatgpt-account-id", cg_id);
+    }
+
+    let mut resp = req
         .send()
         .await
         .map_err(|e| format!("OpenAI router request failed: {}", e))?;
+
+    if matches!(resp.status(), axum::http::StatusCode::UNAUTHORIZED | axum::http::StatusCode::FORBIDDEN) {
+        if let Ok(Some(refreshed)) = token_manager.refresh_codex_token_by_access_token(&api_key).await {
+            api_key = refreshed.access_token;
+            chatgpt_account_id = refreshed.chatgpt_account_id;
+            let mut retry_req = client
+                .post("https://api.openai.com/v1/chat/completions")
+                .header(axum::http::header::USER_AGENT, "codex-cli/1.0.0")
+                .bearer_auth(&api_key)
+                .json(&body);
+            if let Some(cg_id) = &chatgpt_account_id {
+                retry_req = retry_req.header("chatgpt-account-id", cg_id);
+            }
+            resp = retry_req
+                .send()
+                .await
+                .map_err(|e| format!("OpenAI router request failed after refresh: {}", e))?;
+        }
+    }
 
     let status = resp.status();
     let payload: serde_json::Value = resp
