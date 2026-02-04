@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
 use super::storage;
-use super::types::CodexAccount;
+use super::types::{CodexAccount, CodexAuthData};
 
 /// OpenAI Auth0 설정 (Codex CLI와 동일)
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
@@ -88,6 +88,17 @@ struct TokenResponse {
     refresh_token: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CodexRefreshResult {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub id_token: Option<String>,
+    pub email: Option<String>,
+    pub plan_type: Option<String>,
+    pub chatgpt_account_id: Option<String>,
+    pub expires_in: Option<i64>,
+}
+
 /// authorization code로 토큰 교환
 async fn exchange_code_for_tokens(
     issuer: &str,
@@ -126,6 +137,115 @@ async fn exchange_code_for_tokens(
         .map_err(|e| format!("토큰 파싱 실패: {}", e))?;
 
     Ok(tokens)
+}
+
+/// refresh_token으로 access_token 갱신
+async fn refresh_codex_access_token(refresh_token: &str) -> Result<CodexRefreshResult, String> {
+    let client = reqwest::Client::new();
+
+    let body = format!(
+        "grant_type=refresh_token&refresh_token={}&client_id={}&scope={}",
+        urlencoding::encode(refresh_token),
+        urlencoding::encode(CLIENT_ID),
+        urlencoding::encode("openid profile email offline_access")
+    );
+
+    let resp = client
+        .post(format!("{DEFAULT_ISSUER}/oauth/token"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("토큰 갱신 요청 실패: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("토큰 갱신 실패: {} - {}", status, body));
+    }
+
+    let payload: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("토큰 갱신 응답 파싱 실패: {}", e))?;
+
+    let access_token = payload
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("refresh 응답에 access_token이 없습니다")?
+        .to_string();
+    let id_token = payload.get("id_token").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let refresh_token = payload
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let expires_in = payload.get("expires_in").and_then(|v| v.as_i64());
+
+    let (email, plan_type, chatgpt_account_id) = id_token
+        .as_deref()
+        .map(parse_id_token_claims)
+        .unwrap_or((None, None, None));
+
+    Ok(CodexRefreshResult {
+        access_token,
+        refresh_token,
+        id_token,
+        email,
+        plan_type,
+        chatgpt_account_id,
+        expires_in,
+    })
+}
+
+/// Codex 계정 토큰 갱신 후 저장
+pub async fn refresh_codex_account_tokens(
+    account_id: &str,
+) -> Result<(CodexAccount, CodexRefreshResult), String> {
+    let mut store = storage::load_codex_accounts()?;
+    let account = store
+        .accounts
+        .iter_mut()
+        .find(|a| a.id == account_id)
+        .ok_or_else(|| format!("계정을 찾을 수 없습니다: {}", account_id))?;
+
+    let refresh_token = match &account.auth_data {
+        CodexAuthData::ChatGPT { refresh_token, .. } => refresh_token.clone(),
+        CodexAuthData::ApiKey { .. } => {
+            return Err("API 키 계정은 토큰 갱신을 지원하지 않습니다".to_string());
+        }
+    };
+
+    let refresh_result = refresh_codex_access_token(&refresh_token).await?;
+
+    if let CodexAuthData::ChatGPT {
+        access_token,
+        refresh_token,
+        id_token,
+        account_id: chatgpt_account_id,
+    } = &mut account.auth_data
+    {
+        *access_token = refresh_result.access_token.clone();
+        if let Some(new_refresh) = &refresh_result.refresh_token {
+            *refresh_token = new_refresh.clone();
+        }
+        if let Some(new_id) = &refresh_result.id_token {
+            *id_token = new_id.clone();
+        }
+        if let Some(new_chatgpt_id) = &refresh_result.chatgpt_account_id {
+            *chatgpt_account_id = Some(new_chatgpt_id.clone());
+        }
+    }
+
+    if let Some(email) = &refresh_result.email {
+        account.email = Some(email.clone());
+    }
+    if let Some(plan_type) = &refresh_result.plan_type {
+        account.plan_type = Some(plan_type.clone());
+    }
+
+    storage::save_codex_accounts(&store)?;
+
+    Ok((account.clone(), refresh_result))
 }
 
 /// JWT ID 토큰에서 클레임 추출

@@ -49,7 +49,7 @@ async fn handle_codex_passthrough(
     let mut last_email: Option<String> = None;
 
     for attempt in 0..max_attempts {
-        let (api_key, _project_id, email, _wait_ms) = match token_manager
+        let (mut api_key, _project_id, email, _wait_ms) = match token_manager
             .get_token("codex", attempt > 0, Some(&session_id), model_to_send)
             .await
         {
@@ -61,19 +61,46 @@ async fn handle_codex_passthrough(
 
         last_email = Some(email.clone());
 
-        let request = client
+        let mut chatgpt_account_id = token_manager.find_codex_chatgpt_account_id(&api_key);
+
+        let mut request = client
             .post(&url)
             .header(USER_AGENT, CODEX_USER_AGENT)
-            .bearer_auth(api_key)
+            .bearer_auth(&api_key)
             .json(&body);
+        if let Some(cg_id) = &chatgpt_account_id {
+            request = request.header("chatgpt-account-id", cg_id);
+        }
 
-        let response = match request.send().await {
+        let mut response = match request.send().await {
             Ok(res) => res,
             Err(e) => {
                 last_error = format!("OpenAI request failed: {}", e);
                 continue;
             }
         };
+
+        if matches!(response.status(), StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            if let Ok(Some(refreshed)) = token_manager.refresh_codex_token_by_access_token(&api_key).await {
+                api_key = refreshed.access_token;
+                chatgpt_account_id = refreshed.chatgpt_account_id;
+                let mut retry_request = client
+                    .post(&url)
+                    .header(USER_AGENT, CODEX_USER_AGENT)
+                    .bearer_auth(&api_key)
+                    .json(&body);
+                if let Some(cg_id) = &chatgpt_account_id {
+                    retry_request = retry_request.header("chatgpt-account-id", cg_id);
+                }
+                response = match retry_request.send().await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        last_error = format!("OpenAI request failed after refresh: {}", e);
+                        continue;
+                    }
+                };
+            }
+        }
 
         if response.status().is_success() {
             if stream {

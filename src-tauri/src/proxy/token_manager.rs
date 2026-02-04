@@ -18,6 +18,7 @@ pub struct ProxyToken {
     pub timestamp: i64,
     pub email: String,
     pub provider: String,
+    pub chatgpt_account_id: Option<String>,
     pub account_path: PathBuf, // 账号文件路径，用于更新
     pub project_id: Option<String>,
     pub subscription_tier: Option<String>, // "FREE" | "PRO" | "ULTRA"
@@ -190,6 +191,10 @@ impl TokenManager {
             timestamp: now,
             email,
             provider: "codex".to_string(),
+            chatgpt_account_id: match &account.auth_data {
+                CodexAuthData::ChatGPT { account_id, .. } => account_id.clone(),
+                CodexAuthData::ApiKey { .. } => None,
+            },
             account_path: account_path.clone(),
             project_id: None,
             subscription_tier,
@@ -430,6 +435,7 @@ impl TokenManager {
             timestamp,
             email,
             provider,
+            chatgpt_account_id: None,
             account_path: path.clone(),
             project_id,
             subscription_tier,
@@ -1038,27 +1044,9 @@ impl TokenManager {
                     let now = chrono::Utc::now().timestamp();
                     if now >= token.timestamp - 300 {
                         tracing::debug!("账号 {} 的 token 即将过期，正在刷新...", token.email);
-                        match crate::modules::oauth::refresh_access_token(&token.refresh_token)
-                            .await
-                        {
-                            Ok(token_response) => {
-                                token.access_token = token_response.access_token.clone();
-                                token.expires_in = token_response.expires_in;
-                                token.timestamp = now + token_response.expires_in;
-
-                                if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
-                                    entry.access_token = token.access_token.clone();
-                                    entry.expires_in = token.expires_in;
-                                    entry.timestamp = token.timestamp;
-                                }
-                                let _ = self
-                                    .save_refreshed_token(&token.account_id, &token_response)
-                                    .await;
-                            }
-                            Err(e) => {
-                                tracing::warn!("Preferred account token refresh failed: {}", e);
-                                // 继续使用旧 token，让后续逻辑处理失败
-                            }
+                        if let Err(e) = self.refresh_token_for_account(&mut token).await {
+                            tracing::warn!("Preferred account token refresh failed: {}", e);
+                            // 继续使用旧 token，让后续逻辑处理失败
                         }
                     }
 
@@ -1341,62 +1329,35 @@ impl TokenManager {
             let now = chrono::Utc::now().timestamp();
             if now >= token.timestamp - 300 {
                 tracing::debug!("账号 {} 的 token 即将过期，正在刷新...", token.email);
+                if let Err(e) = self.refresh_token_for_account(&mut token).await {
+                    tracing::error!("Token 刷新失败 ({}): {}，尝试下一个账号", token.email, e);
+                    if e.contains("\"invalid_grant\"") || e.contains("invalid_grant") {
+                        tracing::error!(
+                            "Disabling account due to invalid_grant ({}): refresh_token likely revoked/expired",
+                            token.email
+                        );
+                        let _ = self
+                            .disable_account(
+                                &token.account_id,
+                                &format!("invalid_grant: {}", e),
+                            )
+                            .await;
+                        self.tokens.remove(&token.account_id);
+                    }
+                    // Avoid leaking account emails to API clients; details are still in logs.
+                    last_error = Some(format!("Token refresh failed: {}", e));
+                    attempted.insert(token.account_id.clone());
 
-                // 调用 OAuth 刷新 token
-                match crate::modules::oauth::refresh_access_token(&token.refresh_token).await {
-                    Ok(token_response) => {
-                        tracing::debug!("Token 刷新成功！");
-
-                        // 更新本地内存对象供后续使用
-                        token.access_token = token_response.access_token.clone();
-                        token.expires_in = token_response.expires_in;
-                        token.timestamp = now + token_response.expires_in;
-
-                        // 同步更新跨线程共享的 DashMap
-                        if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
-                            entry.access_token = token.access_token.clone();
-                            entry.expires_in = token.expires_in;
-                            entry.timestamp = token.timestamp;
-                        }
-
-                        // 同步落盘（避免重启后继续使用过期 timestamp 导致频繁刷新）
-                        if let Err(e) = self
-                            .save_refreshed_token(&token.account_id, &token_response)
-                            .await
+                    // 【优化】标记需要清除锁定，避免在循环内加锁
+                    if quota_group != "image_gen" {
+                        if matches!(&last_used_account_id, Some((id, _)) if id == &token.account_id)
                         {
-                            tracing::debug!("保存刷新后的 token 失败 ({}): {}", token.email, e);
+                            need_update_last_used =
+                                Some((String::new(), std::time::Instant::now()));
+                            // 空字符串表示需要清除
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("Token 刷新失败 ({}): {}，尝试下一个账号", token.email, e);
-                        if e.contains("\"invalid_grant\"") || e.contains("invalid_grant") {
-                            tracing::error!(
-                                "Disabling account due to invalid_grant ({}): refresh_token likely revoked/expired",
-                                token.email
-                            );
-                            let _ = self
-                                .disable_account(
-                                    &token.account_id,
-                                    &format!("invalid_grant: {}", e),
-                                )
-                                .await;
-                            self.tokens.remove(&token.account_id);
-                        }
-                        // Avoid leaking account emails to API clients; details are still in logs.
-                        last_error = Some(format!("Token refresh failed: {}", e));
-                        attempted.insert(token.account_id.clone());
-
-                        // 【优化】标记需要清除锁定，避免在循环内加锁
-                        if quota_group != "image_gen" {
-                            if matches!(&last_used_account_id, Some((id, _)) if id == &token.account_id)
-                            {
-                                need_update_last_used =
-                                    Some((String::new(), std::time::Instant::now()));
-                                // 空字符串表示需要清除
-                            }
-                        }
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -1527,6 +1488,83 @@ impl TokenManager {
         Ok(())
     }
 
+    async fn refresh_token_for_account(&self, token: &mut ProxyToken) -> Result<(), String> {
+        let now = chrono::Utc::now().timestamp();
+        match token.provider.as_str() {
+            "codex" => {
+                if token.refresh_token.is_empty() {
+                    return Ok(());
+                }
+                let (account, refresh_result) =
+                    crate::modules::codex::refresh_codex_account_tokens(&token.account_id).await?;
+                token.access_token = refresh_result.access_token.clone();
+                token.refresh_token = refresh_result
+                    .refresh_token
+                    .clone()
+                    .unwrap_or_else(|| token.refresh_token.clone());
+                token.expires_in = refresh_result.expires_in.unwrap_or(3600);
+                token.timestamp = now + token.expires_in;
+                token.chatgpt_account_id = match &account.auth_data {
+                    crate::modules::codex::types::CodexAuthData::ChatGPT { account_id, .. } => {
+                        account_id.clone()
+                    }
+                    _ => token.chatgpt_account_id.clone(),
+                };
+
+                if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
+                    entry.access_token = token.access_token.clone();
+                    entry.refresh_token = token.refresh_token.clone();
+                    entry.expires_in = token.expires_in;
+                    entry.timestamp = token.timestamp;
+                    entry.chatgpt_account_id = token.chatgpt_account_id.clone();
+                }
+                Ok(())
+            }
+            _ => {
+                let token_response =
+                    crate::modules::oauth::refresh_access_token(&token.refresh_token).await?;
+                token.access_token = token_response.access_token.clone();
+                token.expires_in = token_response.expires_in;
+                token.timestamp = now + token_response.expires_in;
+
+                if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
+                    entry.access_token = token.access_token.clone();
+                    entry.expires_in = token.expires_in;
+                    entry.timestamp = token.timestamp;
+                }
+
+                let _ = self
+                    .save_refreshed_token(&token.account_id, &token_response)
+                    .await;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn find_codex_chatgpt_account_id(&self, access_token: &str) -> Option<String> {
+        self.tokens
+            .iter()
+            .find(|entry| entry.access_token == access_token && entry.provider == "codex")
+            .and_then(|entry| entry.chatgpt_account_id.clone())
+    }
+
+    pub async fn refresh_codex_token_by_access_token(
+        &self,
+        access_token: &str,
+    ) -> Result<Option<ProxyToken>, String> {
+        let token_opt = self.tokens.iter().find(|entry| {
+            entry.access_token == access_token && entry.provider == "codex"
+        });
+
+        let mut token = match token_opt {
+            Some(entry) => entry.value().clone(),
+            None => return Ok(None),
+        };
+
+        self.refresh_token_for_account(&mut token).await?;
+        Ok(Some(token))
+    }
+
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
@@ -1549,6 +1587,7 @@ impl TokenManager {
                         token.refresh_token.clone(),
                         token.timestamp,
                         token.expires_in,
+                        token.provider.clone(),
                         chrono::Utc::now().timestamp(),
                         token.project_id.clone(),
                     ));
@@ -1564,6 +1603,7 @@ impl TokenManager {
             refresh_token,
             timestamp,
             expires_in,
+            provider,
             now,
             project_id_opt,
         ) = match token_info {
@@ -1580,30 +1620,30 @@ impl TokenManager {
 
         tracing::info!("[Warmup] Token for {} is expiring, refreshing...", email);
 
-        // 调用 OAuth 刷新 token
-        match crate::modules::oauth::refresh_access_token(&refresh_token).await {
-            Ok(token_response) => {
+        let mut token = ProxyToken {
+            account_id,
+            access_token: current_access_token,
+            refresh_token,
+            expires_in,
+            timestamp,
+            email: email.to_string(),
+            provider,
+            chatgpt_account_id: None,
+            account_path: PathBuf::new(),
+            project_id: Some(project_id.clone()),
+            subscription_tier: None,
+            remaining_quota: None,
+            protected_models: HashSet::new(),
+            health_score: 1.0,
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
+        };
+
+        match self.refresh_token_for_account(&mut token).await {
+            Ok(_) => {
                 tracing::info!("[Warmup] Token refresh successful for {}", email);
-                let new_now = chrono::Utc::now().timestamp();
-
-                // 更新缓存
-                if let Some(mut entry) = self.tokens.get_mut(&account_id) {
-                    entry.access_token = token_response.access_token.clone();
-                    entry.expires_in = token_response.expires_in;
-                    entry.timestamp = new_now;
-                }
-
-                // 保存到磁盘
-                let _ = self
-                    .save_refreshed_token(&account_id, &token_response)
-                    .await;
-
-                Ok((
-                    token_response.access_token,
-                    project_id,
-                    email.to_string(),
-                    0,
-                ))
+                Ok((token.access_token, project_id, email.to_string(), 0))
             }
             Err(e) => Err(format!(
                 "[Warmup] Token refresh failed for {}: {}",
@@ -2277,6 +2317,7 @@ mod tests {
             timestamp: chrono::Utc::now().timestamp() + 3600,
             email: email.to_string(),
             provider: "google".to_string(),
+            chatgpt_account_id: None,
             account_path: PathBuf::from("/tmp/test"),
             project_id: None,
             subscription_tier: tier.map(|s| s.to_string()),
@@ -2533,6 +2574,7 @@ mod tests {
             timestamp: chrono::Utc::now().timestamp() + 3600,
             email: email.to_string(),
             provider: "google".to_string(),
+            chatgpt_account_id: None,
             account_path: PathBuf::from("/tmp/test"),
             project_id: None,
             subscription_tier: Some("PRO".to_string()),
