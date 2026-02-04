@@ -112,11 +112,32 @@ pub fn should_escalate_to_pro(config: &PmRouterConfig, context: &str) -> bool {
 }
 
 /// Codex 토큰 부재 등으로 라우터 모델 호출이 실패했는지 판별
-fn is_router_token_unavailable(err: &str) -> bool {
-    let lower = err.to_lowercase();
-    lower.contains("token pool is empty")
-        || lower.contains("provider: codex")
-        || lower.contains("token error")
+fn is_claude_model(model: &str) -> bool {
+    model.to_lowercase().starts_with("claude-")
+}
+
+async fn call_router_with_fallback(
+    state: &AppState,
+    primary_model: &str,
+    fallback_model: &str,
+    prompt: &str,
+    trace_id: &str,
+    label: &str,
+) -> Result<(String, String), String> {
+    match call_router_model(state, primary_model, prompt).await {
+        Ok(response) => Ok((response, primary_model.to_string())),
+        Err(err) => {
+            if primary_model == fallback_model {
+                return Err(err);
+            }
+            warn!(
+                "[{}][PM-Router] {} model {} failed: {}. Falling back to {}.",
+                trace_id, label, primary_model, err, fallback_model
+            );
+            let response = call_router_model(state, fallback_model, prompt).await?;
+            Ok((response, fallback_model.to_string()))
+        }
+    }
 }
 
 pub async fn select_model_for_claude_request(
@@ -129,18 +150,16 @@ pub async fn select_model_for_claude_request(
     let context = build_router_context(request, config.max_context_chars);
     let prompt = build_router_prompt(request, headers, &context);
 
-    let (lite_response, used_lite_model) = match call_router_model(state, &config.pm_lite_model, &prompt).await {
-        Ok(r) => (r, config.pm_lite_model.clone()),
-        Err(e) if is_codex_model(&config.pm_lite_model) && is_router_token_unavailable(&e) => {
-            info!(
-                "[{}][PM-Router] Codex router unavailable ({}), using fallback router: {}",
-                trace_id, config.pm_lite_model, config.fallback_model
-            );
-            let r = call_router_model(state, &config.fallback_model, &prompt).await?;
-            (r, config.fallback_model.clone())
-        }
-        Err(e) => return Err(e),
-    };
+    let (lite_response, used_lite_model) =
+        call_router_with_fallback(
+            state,
+            &config.pm_lite_model,
+            &config.fallback_model,
+            &prompt,
+            trace_id,
+            "PM-lite",
+        )
+        .await?;
 
     let parsed_lite = parse_router_response(&lite_response)?;
     let mut selected = validate_router_model(&parsed_lite.selected_model, config);
@@ -149,24 +168,26 @@ pub async fn select_model_for_claude_request(
 
     if parsed_lite.needs_pro || should_escalate_to_pro(config, &context) {
         let pro_prompt = build_router_prompt(request, headers, &context);
-        let (pro_response, used_pro_model_opt) = match call_router_model(state, &config.pm_pro_model, &pro_prompt).await {
-            Ok(r) => (r, Some(config.pm_pro_model.clone())),
-            Err(e) if is_codex_model(&config.pm_pro_model) && is_router_token_unavailable(&e) => {
-                info!(
-                    "[{}][PM-Router] Codex PM-pro unavailable ({}), using fallback: {}",
-                    trace_id, config.pm_pro_model, config.fallback_model
-                );
-                let r = call_router_model(state, &config.fallback_model, &pro_prompt).await?;
-                (r, Some(config.fallback_model.clone()))
-            }
-            Err(err) => {
-                warn!(
-                    "[{}][PM-Router] PM-pro failed: {} (falling back to PM-lite)",
-                    trace_id, err
-                );
-                (String::new(), None)
-            }
-        };
+        let (pro_response, used_pro_model_opt) =
+            match call_router_with_fallback(
+                state,
+                &config.pm_pro_model,
+                &config.fallback_model,
+                &pro_prompt,
+                trace_id,
+                "PM-pro",
+            )
+            .await
+            {
+                Ok((response, model_used)) => (response, Some(model_used)),
+                Err(err) => {
+                    warn!(
+                        "[{}][PM-Router] PM-pro failed: {} (falling back to PM-lite)",
+                        trace_id, err
+                    );
+                    (String::new(), None)
+                }
+            };
         if let Some(pro_model_used) = used_pro_model_opt {
             if let Ok(parsed_pro) = parse_router_response(&pro_response) {
                 selected = validate_router_model(&parsed_pro.selected_model, config);
@@ -305,6 +326,8 @@ async fn call_router_model(
 ) -> Result<String, String> {
     if is_codex_model(model) {
         call_openai_router_model(state, model, prompt).await
+    } else if is_claude_model(model) {
+        call_anthropic_router_model(state, model, prompt).await
     } else {
         call_gemini_router_model(state, model, prompt).await
     }
@@ -436,4 +459,68 @@ async fn call_gemini_router_model(
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| "Gemini router missing content".to_string())
+}
+
+async fn call_anthropic_router_model(
+    state: &AppState,
+    model: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    let zai = state.zai.read().await.clone();
+    if !zai.enabled || zai.api_key.trim().is_empty() {
+        return Err("Anthropic router unavailable: z.ai is disabled or missing api_key".to_string());
+    }
+
+    let body = json!({
+        "model": model,
+        "system": "Return ONLY JSON.",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{ "type": "text", "text": prompt }]
+            }
+        ],
+        "temperature": 0.2,
+        "max_tokens": 256
+    });
+
+    let timeout_secs = state.request_timeout.max(5);
+    let upstream_proxy = state.upstream_proxy.read().await.clone();
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs));
+    if let Some(config) = upstream_proxy {
+        if config.enabled && !config.url.is_empty() {
+            let proxy = reqwest::Proxy::all(&config.url)
+                .map_err(|e| format!("Invalid upstream proxy url: {}", e))?;
+            builder = builder.proxy(proxy);
+        }
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("Failed to build Anthropic router client: {}", e))?;
+
+    let url = format!("{}/v1/messages", zai.base_url.trim_end_matches('/'));
+    let resp = client
+        .post(url)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header("x-api-key", zai.api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Anthropic router request failed: {}", e))?;
+
+    let status = resp.status();
+    let payload: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Anthropic router invalid response: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("Anthropic router error {}: {}", status, payload));
+    }
+
+    payload["content"][0]["text"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Anthropic router missing content".to_string())
 }

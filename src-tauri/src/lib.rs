@@ -11,6 +11,19 @@ use modules::logger;
 use tracing::{info, warn, error};
 use std::sync::Arc;
 
+fn mask_sensitive(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "(empty)".to_string();
+    }
+    if trimmed.len() <= 8 {
+        return "********".to_string();
+    }
+    let prefix = &trimmed[..4];
+    let suffix = &trimmed[trimmed.len() - 4..];
+    format!("{}****{}", prefix, suffix)
+}
+
 /// Increase file descriptor limit for macOS to prevent "Too many open files" errors
 #[cfg(target_os = "macos")]
 fn increase_nofile_limit() {
@@ -138,9 +151,10 @@ pub fn run() {
                     info!("--------------------------------------------------");
                     info!("🚀 Headless mode proxy service starting...");
                     info!("📍 Port: {}", config.proxy.port);
-                    info!("🔑 Current API Key: {}", config.proxy.api_key);
+                    let masked_api_key = mask_sensitive(&config.proxy.api_key);
+                    info!("🔑 Current API Key: {}", masked_api_key);
                     if let Some(ref pwd) = config.proxy.admin_password {
-                        info!("🔐 Web UI Password: {}", pwd);
+                        info!("🔐 Web UI Password: {}", mask_sensitive(pwd));
                     } else {
                         info!("🔐 Web UI Password: (Same as API Key)");
                     }
