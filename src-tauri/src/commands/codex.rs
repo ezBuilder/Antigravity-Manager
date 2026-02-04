@@ -1,12 +1,13 @@
 //! Codex 계정 관리 Tauri 커맨드
 
 use crate::modules::codex::{
-    add_codex_account, get_codex_account_usage, get_codex_active_account,
+    add_codex_account as add_codex_account_internal, get_codex_account_usage, get_codex_active_account,
     import_from_codex_auth_json, load_codex_accounts, refresh_all_codex_usage,
     remove_codex_account, rename_codex_account, set_codex_active_account, start_codex_oauth_login,
-    switch_to_codex_account, touch_codex_account, wait_for_codex_oauth_login, CodexAccountInfo,
-    CodexUsageInfo, OAuthLoginInfo,
+    switch_to_codex_account, touch_codex_account, wait_for_codex_oauth_login, CodexAccount,
+    CodexAccountInfo, CodexUsageInfo, OAuthLoginInfo,
 };
+use chrono::Utc;
 
 /// Codex 계정 목록 조회
 #[tauri::command]
@@ -46,7 +47,24 @@ pub async fn add_codex_account_from_file(
     let account = import_from_codex_auth_json(&path, name)?;
 
     // 저장소에 추가
-    let stored = add_codex_account(account)?;
+    let stored = add_codex_account_internal(account)?;
+
+    let store = load_codex_accounts()?;
+    let active_id = store.active_account_id.as_deref();
+
+    Ok(CodexAccountInfo::from_account(&stored, active_id))
+}
+
+/// Codex API 키 계정 추가
+#[tauri::command]
+pub async fn add_codex_account(label: Option<String>, api_key: String) -> Result<CodexAccountInfo, String> {
+    let name = label
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("Codex-{}", Utc::now().timestamp()));
+
+    let account = CodexAccount::new_api_key(name, api_key);
+    let stored = add_codex_account_internal(account)?;
 
     let store = load_codex_accounts()?;
     let active_id = store.active_account_id.as_deref();
